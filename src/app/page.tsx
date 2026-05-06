@@ -5,12 +5,59 @@ import Dashboard from "@/components/Dashboard";
 
 type Step = "phone" | "code" | "password" | "done";
 
-interface UserInfo {
+export interface UserInfo {
   id: string;
   firstName?: string;
   lastName?: string;
   username?: string;
   phone?: string;
+}
+
+export interface TelegramAccount {
+  id: string;
+  session: string;
+  user: UserInfo;
+}
+
+const ACCOUNTS_KEY = "telegram_accounts";
+const CURRENT_ACCOUNT_KEY = "telegram_current_account_id";
+const LEGACY_SESSION_KEY = "telegram_session";
+
+function readStoredAccounts(): TelegramAccount[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const raw = localStorage.getItem(ACCOUNTS_KEY);
+    if (!raw) return [];
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.filter(
+      (account): account is TelegramAccount =>
+        typeof account?.id === "string" &&
+        typeof account?.session === "string" &&
+        typeof account?.user?.id === "string"
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredAccounts(accounts: TelegramAccount[], currentId = "") {
+  localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
+
+  if (currentId) {
+    const current = accounts.find((account) => account.id === currentId);
+    localStorage.setItem(CURRENT_ACCOUNT_KEY, currentId);
+    if (current) {
+      localStorage.setItem(LEGACY_SESSION_KEY, current.session);
+    }
+    return;
+  }
+
+  localStorage.removeItem(CURRENT_ACCOUNT_KEY);
+  localStorage.removeItem(LEGACY_SESSION_KEY);
 }
 
 export default function Home() {
@@ -21,14 +68,33 @@ export default function Home() {
   const [phoneCodeHash, setPhoneCodeHash] = useState("");
   const [sessionString, setSessionString] = useState("");
   const [user, setUser] = useState<UserInfo | null>(null);
+  const [accounts, setAccounts] = useState<TelegramAccount[]>(() =>
+    readStoredAccounts()
+  );
+  const [currentAccountId, setCurrentAccountId] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    const saved = localStorage.getItem("telegram_session");
-    if (saved) {
-      void checkSession(saved);
+    const savedAccounts = readStoredAccounts();
+
+    const savedCurrentId = localStorage.getItem(CURRENT_ACCOUNT_KEY) || "";
+    const selectedAccount =
+      savedAccounts.find((account) => account.id === savedCurrentId) ??
+      savedAccounts[0];
+
+    if (selectedAccount) {
+      void checkSession(selectedAccount.session, {
+        accountId: selectedAccount.id,
+        preserveAccounts: savedAccounts,
+      });
+      return;
+    }
+
+    const legacySession = localStorage.getItem(LEGACY_SESSION_KEY);
+    if (legacySession) {
+      void checkSession(legacySession);
       return;
     }
 
@@ -36,23 +102,50 @@ export default function Home() {
     return () => window.clearTimeout(id);
   }, []);
 
-  async function checkSession(session: string) {
+  async function validateSession(session: string): Promise<UserInfo | null> {
+    const res = await fetch("/api/telegram/check-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionString: session }),
+    });
+    const data = await res.json();
+    return data.valid ? data.user : null;
+  }
+
+  async function checkSession(
+    session: string,
+    options: { accountId?: string; preserveAccounts?: TelegramAccount[] } = {}
+  ) {
     try {
-      const res = await fetch("/api/telegram/check-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionString: session }),
-      });
-      const data = await res.json();
-      if (data.valid) {
-        setUser(data.user);
+      const validUser = await validateSession(session);
+      if (validUser) {
+        const accountId = options.accountId ?? validUser.id;
+        const baseAccounts = options.preserveAccounts ?? accounts;
+        const nextAccount: TelegramAccount = {
+          id: accountId,
+          session,
+          user: validUser,
+        };
+        const nextAccounts = [
+          nextAccount,
+          ...baseAccounts.filter((account) => account.id !== accountId),
+        ];
+
+        setAccounts(nextAccounts);
+        setCurrentAccountId(accountId);
+        setUser(validUser);
         setSessionString(session);
         setStep("done");
+        writeStoredAccounts(nextAccounts, accountId);
       } else {
-        localStorage.removeItem("telegram_session");
+        const nextAccounts = (options.preserveAccounts ?? accounts).filter(
+          (account) => account.session !== session
+        );
+        setAccounts(nextAccounts);
+        writeStoredAccounts(nextAccounts, nextAccounts[0]?.id ?? "");
       }
     } catch {
-      localStorage.removeItem("telegram_session");
+      localStorage.removeItem(LEGACY_SESSION_KEY);
     } finally {
       setChecking(false);
     }
@@ -105,7 +198,6 @@ export default function Home() {
       } else if (data.requiresPassword) {
         setStep("password");
       } else {
-        localStorage.setItem("telegram_session", data.session);
         setSessionString(data.session);
         await checkSession(data.session);
       }
@@ -125,15 +217,54 @@ export default function Home() {
         body: JSON.stringify({ sessionString }),
       });
     } finally {
-      localStorage.removeItem("telegram_session");
-      setUser(null);
-      setSessionString("");
-      setPhoneNumber("");
-      setPhoneCode("");
-      setPassword("");
-      setStep("phone");
+      const nextAccounts = accounts.filter(
+        (account) => account.id !== currentAccountId
+      );
+      const nextAccount = nextAccounts[0];
+
+      setAccounts(nextAccounts);
+      if (nextAccount) {
+        setUser(nextAccount.user);
+        setSessionString(nextAccount.session);
+        setCurrentAccountId(nextAccount.id);
+        setStep("done");
+        writeStoredAccounts(nextAccounts, nextAccount.id);
+      } else {
+        writeStoredAccounts([], "");
+        startAddAccount();
+      }
       setLoading(false);
     }
+  }
+
+  function startAddAccount() {
+    setUser(null);
+    setSessionString("");
+    setPhoneNumber("");
+    setPhoneCode("");
+    setPhoneCodeHash("");
+    setPassword("");
+    setError("");
+    setStep("phone");
+  }
+
+  function handleSwitchAccount(accountId: string) {
+    const account = accounts.find((item) => item.id === accountId);
+    if (
+      !account ||
+      (account.id === currentAccountId &&
+        step === "done" &&
+        user !== null &&
+        sessionString === account.session)
+    ) {
+      return;
+    }
+
+    setUser(account.user);
+    setSessionString(account.session);
+    setCurrentAccountId(account.id);
+    setStep("done");
+    writeStoredAccounts(accounts, account.id);
   }
 
   // Loading state
@@ -151,7 +282,16 @@ export default function Home() {
   // Dashboard
   if (step === "done" && user) {
     return (
-      <Dashboard user={user} session={sessionString} onSignOut={handleSignOut} />
+      <Dashboard
+        key={currentAccountId || sessionString}
+        user={user}
+        session={sessionString}
+        accounts={accounts}
+        currentAccountId={currentAccountId}
+        onSwitchAccount={handleSwitchAccount}
+        onAddAccount={startAddAccount}
+        onSignOut={handleSignOut}
+      />
     );
   }
 
@@ -299,6 +439,50 @@ export default function Home() {
         <p className="mt-4 text-center text-xs text-zinc-400">
           Secured with Telegram&apos;s MTProto encryption
         </p>
+        {accounts.length > 0 && (
+          <div className="mt-4 rounded-2xl border border-zinc-200/80 bg-white p-3 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+            <p className="px-2 pb-2 text-xs font-semibold text-zinc-500">
+              Saved accounts
+            </p>
+            <div className="space-y-1">
+              {accounts.map((account) => {
+                const name =
+                  [account.user.firstName, account.user.lastName]
+                    .filter(Boolean)
+                    .join(" ") ||
+                  account.user.username ||
+                  account.user.phone ||
+                  "User";
+                const initials =
+                  (account.user.firstName?.[0] ?? "") +
+                    (account.user.lastName?.[0] ?? "") || "U";
+
+                return (
+                  <button
+                    key={account.id}
+                    type="button"
+                    onClick={() => handleSwitchAccount(account.id)}
+                    className="flex w-full min-w-0 items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  >
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 text-xs font-bold text-white">
+                      {initials}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                        {name}
+                      </p>
+                      {account.user.username && (
+                        <p className="truncate text-xs text-zinc-500">
+                          @{account.user.username}
+                        </p>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

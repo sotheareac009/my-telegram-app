@@ -26,6 +26,7 @@ interface GroupMediaProps {
 
 type TabId = "all" | "photo" | "video" | "file";
 type VideoLayout = "landscape" | "portrait";
+const VIDEO_PER_PAGE = 50;
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   {
@@ -108,6 +109,7 @@ export default function GroupMedia({
   const [loadingMore, setLoadingMore] = useState(false);
   const [tab, setTab] = useState<TabId>("all");
   const [videoLayout, setVideoLayout] = useState<VideoLayout>("portrait");
+  const [videoPage, setVideoPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [nextOffsetId, setNextOffsetId] = useState(0);
   const [viewer, setViewer] = useState<MediaItem | null>(null);
@@ -138,6 +140,9 @@ export default function GroupMedia({
       });
       const data = await res.json();
       if (data.media) {
+        if (reset) {
+          setVideoPage(1);
+        }
         setMedia((prev) => (reset ? data.media : [...prev, ...data.media]));
         setHasMore(data.hasMore);
         setNextOffsetId(data.nextOffsetId);
@@ -156,6 +161,12 @@ export default function GroupMedia({
   const photos = filtered.filter((m) => m.type === "photo");
   const videos = filtered.filter((m) => m.type === "video");
   const files = filtered.filter((m) => m.type === "file");
+  const videoTotalPages = Math.ceil(videos.length / VIDEO_PER_PAGE);
+  const currentVideoPage = Math.min(videoPage, Math.max(videoTotalPages, 1));
+  const paginatedVideos = videos.slice(
+    (currentVideoPage - 1) * VIDEO_PER_PAGE,
+    currentVideoPage * VIDEO_PER_PAGE
+  );
 
   const counts = {
     all: media.length,
@@ -217,7 +228,10 @@ export default function GroupMedia({
         {TABS.map((t) => (
           <button
             key={t.id}
-            onClick={() => setTab(t.id)}
+            onClick={() => {
+              setTab(t.id);
+              setVideoPage(1);
+            }}
             className={`flex shrink-0 items-center gap-2 border-b-2 px-3 py-3 text-sm font-medium transition-colors sm:px-4 ${
               tab === t.id
                 ? "border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400"
@@ -370,7 +384,7 @@ export default function GroupMedia({
                   </div>
                 </div>
                 <div className={videoGridClass}>
-                  {videos.map((item) => (
+                  {paginatedVideos.map((item) => (
                     <button
                       key={item.id}
                       onClick={() => setViewer(item)}
@@ -433,6 +447,46 @@ export default function GroupMedia({
                     </button>
                   ))}
                 </div>
+                {videoTotalPages > 1 && (
+                  <div className="mt-4 flex items-center justify-start gap-2 overflow-x-auto border-t border-zinc-200 pt-4 sm:justify-center dark:border-zinc-800">
+                    <button
+                      type="button"
+                      onClick={() => setVideoPage((page) => Math.max(1, page - 1))}
+                      disabled={currentVideoPage === 1}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-200 text-zinc-600 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="15 18 9 12 15 6" />
+                      </svg>
+                    </button>
+                    {Array.from({ length: videoTotalPages }).map((_, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setVideoPage(i + 1)}
+                        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-medium transition-colors ${
+                          currentVideoPage === i + 1
+                            ? "bg-blue-600 text-white shadow-sm"
+                            : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                        }`}
+                      >
+                        {i + 1}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setVideoPage((page) => Math.min(videoTotalPages, page + 1))
+                      }
+                      disabled={currentVideoPage === videoTotalPages}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-200 text-zinc-600 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
               </section>
             )}
 

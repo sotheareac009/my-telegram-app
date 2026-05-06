@@ -10,10 +10,29 @@ interface UserInfo {
   phone?: string;
 }
 
+interface TelegramAccount {
+  id: string;
+  session: string;
+  user: UserInfo;
+}
+
 interface HeaderProps {
   user: UserInfo;
   session: string;
+  accounts: TelegramAccount[];
+  currentAccountId: string;
+  onSwitchAccount: (accountId: string) => void;
+  onAddAccount: () => void;
   onSignOut: () => void;
+}
+
+function getInitials(user: UserInfo) {
+  return (user.firstName?.[0] ?? "") + (user.lastName?.[0] ?? "") || "U";
+}
+
+function getDisplayName(user: UserInfo) {
+  const name = [user.firstName, user.lastName].filter(Boolean).join(" ");
+  return name || user.username || user.phone || "User";
 }
 
 function InitialsAvatar({ initials }: { initials: string }) {
@@ -24,7 +43,71 @@ function InitialsAvatar({ initials }: { initials: string }) {
   );
 }
 
-export default function Header({ user, session, onSignOut }: HeaderProps) {
+function AccountAvatar({ account }: { account: TelegramAccount }) {
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoFailed, setPhotoFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    async function loadPhoto() {
+      setPhotoFailed(false);
+      setPhotoUrl(null);
+
+      try {
+        const res = await fetch("/api/telegram/profile-photo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionString: account.session }),
+        });
+
+        if (!res.ok) {
+          if (!cancelled) setPhotoFailed(true);
+          return;
+        }
+
+        const blob = await res.blob();
+        objectUrl = URL.createObjectURL(blob);
+        if (!cancelled) {
+          setPhotoUrl(objectUrl);
+        }
+      } catch {
+        if (!cancelled) setPhotoFailed(true);
+      }
+    }
+
+    void loadPhoto();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [account.session]);
+
+  if (photoUrl && !photoFailed) {
+    return (
+      <img
+        src={photoUrl}
+        alt={getDisplayName(account.user)}
+        onError={() => setPhotoFailed(true)}
+        className="h-8 w-8 shrink-0 rounded-full object-cover shadow-sm"
+      />
+    );
+  }
+
+  return <InitialsAvatar initials={getInitials(account.user)} />;
+}
+
+export default function Header({
+  user,
+  session,
+  accounts,
+  currentAccountId,
+  onSwitchAccount,
+  onAddAccount,
+  onSignOut,
+}: HeaderProps) {
   const [open, setOpen] = useState(false);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [photoFailed, setPhotoFailed] = useState(false);
@@ -40,8 +123,7 @@ export default function Header({ user, session, onSignOut }: HeaderProps) {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const initials =
-    (user.firstName?.[0] ?? "") + (user.lastName?.[0] ?? "") || "U";
+  const initials = getInitials(user);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +176,7 @@ export default function Header({ user, session, onSignOut }: HeaderProps) {
     );
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 bg-white/80 px-4 backdrop-blur-xl sm:h-16 sm:px-6 dark:border-zinc-800 dark:bg-zinc-950/80">
+    <header className="relative z-50 flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 bg-white/80 px-4 backdrop-blur-xl sm:h-16 sm:px-6 dark:border-zinc-800 dark:bg-zinc-950/80">
       {/* Left: Brand */}
       <div className="flex items-center gap-3">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-600 to-cyan-500 shadow-sm">
@@ -142,7 +224,7 @@ export default function Header({ user, session, onSignOut }: HeaderProps) {
         </button>
 
         {open && (
-          <div className="absolute right-0 top-full z-50 mt-2 w-[calc(100vw-2rem)] max-w-64 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl shadow-zinc-200/50 dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-black/30">
+          <div className="absolute right-0 top-full z-[60] mt-2 w-[calc(100vw-2rem)] max-w-64 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl shadow-zinc-200/50 dark:border-zinc-700 dark:bg-zinc-900 dark:shadow-black/30">
             <div className="border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
               <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                 {user.firstName} {user.lastName}
@@ -154,7 +236,71 @@ export default function Header({ user, session, onSignOut }: HeaderProps) {
                 <p className="mt-0.5 text-xs text-zinc-400">+{user.phone}</p>
               )}
             </div>
+            {accounts.length > 0 && (
+              <div className="border-b border-zinc-100 p-1.5 dark:border-zinc-800">
+                <p className="px-3 py-1.5 text-[11px] font-semibold uppercase text-zinc-400">
+                  Accounts
+                </p>
+                <div className="max-h-48 overflow-y-auto">
+                  {accounts.map((account) => {
+                    const isCurrent = account.id === currentAccountId;
+                    return (
+                      <button
+                        key={account.id}
+                        type="button"
+                        onClick={() => {
+                          setOpen(false);
+                          onSwitchAccount(account.id);
+                        }}
+                        className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-colors ${
+                          isCurrent
+                            ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
+                            : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        }`}
+                      >
+                        <AccountAvatar account={account} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">
+                            {getDisplayName(account.user)}
+                          </p>
+                          {account.user.username && (
+                            <p className="truncate text-xs text-zinc-500">
+                              @{account.user.username}
+                            </p>
+                          )}
+                        </div>
+                        {isCurrent && (
+                          <span className="h-2 w-2 rounded-full bg-blue-500" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div className="p-1.5">
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onAddAccount();
+                }}
+                className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-700 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 5v14" />
+                  <path d="M5 12h14" />
+                </svg>
+                Add account
+              </button>
               <button
                 onClick={() => {
                   setOpen(false);

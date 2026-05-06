@@ -15,13 +15,31 @@ interface UserInfo {
   phone?: string;
 }
 
+interface TelegramAccount {
+  id: string;
+  session: string;
+  user: UserInfo;
+}
+
 interface DashboardProps {
   user: UserInfo;
   session: string;
+  accounts: TelegramAccount[];
+  currentAccountId: string;
+  onSwitchAccount: (accountId: string) => void;
+  onAddAccount: () => void;
   onSignOut: () => void;
 }
 
-export default function Dashboard({ user, session, onSignOut }: DashboardProps) {
+export default function Dashboard({
+  user,
+  session,
+  accounts,
+  currentAccountId,
+  onSwitchAccount,
+  onAddAccount,
+  onSignOut,
+}: DashboardProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [activeMenu, setActiveMenu] = useState("home");
   const [selectedGroup, setSelectedGroup] = useState<GroupInfo | null>(null);
@@ -58,7 +76,15 @@ export default function Dashboard({ user, session, onSignOut }: DashboardProps) 
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-950">
-      <Header user={user} session={session} onSignOut={onSignOut} />
+      <Header
+        user={user}
+        session={session}
+        accounts={accounts}
+        currentAccountId={currentAccountId}
+        onSwitchAccount={onSwitchAccount}
+        onAddAccount={onAddAccount}
+        onSignOut={onSignOut}
+      />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar
           activeMenu={activeMenu}

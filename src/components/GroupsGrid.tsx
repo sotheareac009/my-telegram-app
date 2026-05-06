@@ -58,7 +58,7 @@ export default function GroupsGrid({ session, type, onGroupSelect }: GroupsGridP
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const perPage = 10;
+  const perPage = 20;
 
   useEffect(() => {
     if (!session) return;

@@ -28,10 +28,12 @@ export default function Home() {
   useEffect(() => {
     const saved = localStorage.getItem("telegram_session");
     if (saved) {
-      checkSession(saved);
-    } else {
-      setChecking(false);
+      void checkSession(saved);
+      return;
     }
+
+    const id = window.setTimeout(() => setChecking(false), 0);
+    return () => window.clearTimeout(id);
   }, []);
 
   async function checkSession(session: string) {
@@ -137,7 +139,7 @@ export default function Home() {
   // Loading state
   if (checking) {
     return (
-      <div className="flex h-screen items-center justify-center bg-zinc-50 dark:bg-zinc-950">
+      <div className="flex min-h-dvh items-center justify-center bg-zinc-50 dark:bg-zinc-950">
         <div className="flex flex-col items-center gap-3">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-300 border-t-blue-600" />
           <p className="text-sm text-zinc-500">Checking session...</p>
@@ -155,11 +157,11 @@ export default function Home() {
 
   // Login
   return (
-    <div className="flex h-screen items-center justify-center bg-gradient-to-br from-zinc-50 via-white to-blue-50/30 p-4 dark:from-zinc-950 dark:via-zinc-950 dark:to-blue-950/10">
+    <div className="flex min-h-dvh items-center justify-center bg-gradient-to-br from-zinc-50 via-white to-blue-50/30 p-4 sm:p-6 dark:from-zinc-950 dark:via-zinc-950 dark:to-blue-950/10">
       <div className="w-full max-w-sm">
         {/* Logo */}
-        <div className="mb-8 flex flex-col items-center gap-4">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-500 shadow-lg shadow-blue-500/25">
+        <div className="mb-6 flex flex-col items-center gap-4 sm:mb-8">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-500 shadow-lg shadow-blue-500/25 sm:h-16 sm:w-16">
             <svg
               width="28"
               height="28"
@@ -186,7 +188,7 @@ export default function Home() {
         </div>
 
         {/* Card */}
-        <div className="rounded-2xl border border-zinc-200/80 bg-white p-6 shadow-xl shadow-zinc-200/40 dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/20">
+        <div className="rounded-2xl border border-zinc-200/80 bg-white p-5 shadow-xl shadow-zinc-200/40 sm:p-6 dark:border-zinc-800 dark:bg-zinc-900 dark:shadow-black/20">
           {error && (
             <div className="mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600 dark:bg-red-950/30 dark:text-red-400">
               {error}

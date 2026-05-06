@@ -11,11 +11,11 @@ interface BreadcrumbProps {
 
 export default function Breadcrumb({ items }: BreadcrumbProps) {
   return (
-    <nav className="flex items-center gap-1.5 text-sm">
+    <nav className="flex min-w-0 items-center gap-1.5 overflow-hidden text-sm">
       {items.map((item, i) => {
         const isLast = i === items.length - 1;
         return (
-          <span key={i} className="flex items-center gap-1.5">
+          <span key={i} className="flex min-w-0 items-center gap-1.5">
             {i > 0 && (
               <svg
                 width="14"
@@ -32,13 +32,13 @@ export default function Breadcrumb({ items }: BreadcrumbProps) {
               </svg>
             )}
             {isLast ? (
-              <span className="font-medium text-zinc-900 dark:text-zinc-100">
+              <span className="truncate font-medium text-zinc-900 dark:text-zinc-100">
                 {item.label}
               </span>
             ) : (
               <button
                 onClick={item.onClick}
-                className="font-medium text-zinc-500 transition-colors hover:text-blue-600 dark:text-zinc-400 dark:hover:text-blue-400"
+                className="shrink-0 font-medium text-zinc-500 transition-colors hover:text-blue-600 dark:text-zinc-400 dark:hover:text-blue-400"
               >
                 {item.label}
               </button>

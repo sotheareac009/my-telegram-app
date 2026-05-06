@@ -103,20 +103,14 @@ export default function GroupsGrid({ session, type, onGroupSelect }: GroupsGridP
     currentPage * perPage
   );
 
-  // Split into rows of 5
-  const rows: Group[][] = [];
-  for (let i = 0; i < paginated.length; i += 5) {
-    rows.push(paginated.slice(i, i + 5));
-  }
-
   const title = type === "channels" ? "Channels" : "Groups";
 
   return (
-    <div className="flex h-full flex-col p-6">
+    <div className="flex h-full flex-col p-4 sm:p-6">
       {/* Header */}
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
+      <div className="mb-4 flex flex-col gap-4 sm:mb-6 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-xl font-bold text-zinc-900 sm:text-2xl dark:text-zinc-100">
             {title}
           </h2>
           <p className="mt-1 text-sm text-zinc-500">
@@ -154,13 +148,13 @@ export default function GroupsGrid({ session, type, onGroupSelect }: GroupsGridP
       </div>
 
       {/* Grid */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {loading ? (
-          <div className="grid grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             {Array.from({ length: 10 }).map((_, i) => (
               <div
                 key={i}
-                className="flex flex-col items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900"
+                className="flex min-w-0 flex-col items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900"
               >
                 <div className="h-14 w-14 animate-pulse rounded-full bg-zinc-200 dark:bg-zinc-700" />
                 <div className="h-3 w-20 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700" />
@@ -192,73 +186,63 @@ export default function GroupsGrid({ session, type, onGroupSelect }: GroupsGridP
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {rows.map((row, rowIndex) => (
-              <div key={rowIndex} className="grid grid-cols-5 gap-4">
-                {row.map((group, colIndex) => {
-                  const globalIndex =
-                    (currentPage - 1) * perPage + rowIndex * 5 + colIndex;
-                  return (
-                    <button
-                      key={group.id}
-                      onClick={() => onGroupSelect({ id: group.id, title: group.title })}
-                      className="group relative flex flex-col items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-5 transition-all hover:border-blue-200 hover:shadow-lg hover:shadow-blue-500/5 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-blue-800"
-                    >
-                      {/* Unread Badge */}
-                      {group.unreadCount > 0 && (
-                        <span className="absolute right-3 top-3 flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white">
-                          {group.unreadCount > 99
-                            ? "99+"
-                            : group.unreadCount}
-                        </span>
-                      )}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {paginated.map((group, index) => {
+              const globalIndex = (currentPage - 1) * perPage + index;
+              return (
+                <button
+                  key={group.id}
+                  onClick={() =>
+                    onGroupSelect({ id: group.id, title: group.title })
+                  }
+                  className="group relative flex min-w-0 flex-col items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-5 transition-all hover:border-blue-200 hover:shadow-lg hover:shadow-blue-500/5 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-blue-800"
+                >
+                  {/* Unread Badge */}
+                  {group.unreadCount > 0 && (
+                    <span className="absolute right-3 top-3 flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white">
+                      {group.unreadCount > 99 ? "99+" : group.unreadCount}
+                    </span>
+                  )}
 
-                      {/* Avatar */}
-                      <DialogAvatar
-                        session={session}
-                        groupId={group.id}
-                        title={group.title}
-                        fallbackClassName={getGradient(globalIndex)}
-                      />
+                  {/* Avatar */}
+                  <DialogAvatar
+                    session={session}
+                    groupId={group.id}
+                    title={group.title}
+                    fallbackClassName={getGradient(globalIndex)}
+                  />
 
-                      {/* Info */}
-                      <div className="w-full text-center">
-                        <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                          {group.title}
-                        </p>
-                        <p className="mt-0.5 truncate text-xs text-zinc-500">
-                          {group.lastMessage || "No messages yet"}
-                        </p>
-                      </div>
+                  {/* Info */}
+                  <div className="w-full text-center">
+                    <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      {group.title}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-zinc-500">
+                      {group.lastMessage || "No messages yet"}
+                    </p>
+                  </div>
 
-                      {/* Footer */}
-                      <div className="flex w-full items-center justify-between">
-                        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800">
-                          {group.isChannel ? "Channel" : "Group"}
-                        </span>
-                        {group.date > 0 && (
-                          <span className="text-[10px] text-zinc-400">
-                            {formatTime(group.date)}
-                          </span>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
-                {/* Fill empty cells to keep grid aligned */}
-                {row.length < 5 &&
-                  Array.from({ length: 5 - row.length }).map((_, i) => (
-                    <div key={`empty-${i}`} />
-                  ))}
-              </div>
-            ))}
+                  {/* Footer */}
+                  <div className="flex w-full min-w-0 items-center justify-between gap-2">
+                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800">
+                      {group.isChannel ? "Channel" : "Group"}
+                    </span>
+                    {group.date > 0 && (
+                      <span className="shrink-0 text-[10px] text-zinc-400">
+                        {formatTime(group.date)}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="mt-6 flex items-center justify-center gap-2 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+        <div className="mt-4 flex items-center justify-start gap-2 overflow-x-auto border-t border-zinc-200 pt-4 sm:mt-6 sm:justify-center dark:border-zinc-800">
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page === 1}
@@ -271,8 +255,8 @@ export default function GroupsGrid({ session, type, onGroupSelect }: GroupsGridP
           {Array.from({ length: totalPages }).map((_, i) => (
             <button
               key={i}
-            onClick={() => setPage(i + 1)}
-            className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium transition-colors ${
+              onClick={() => setPage(i + 1)}
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-sm font-medium transition-colors ${
                 currentPage === i + 1
                   ? "bg-blue-600 text-white shadow-sm"
                   : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"

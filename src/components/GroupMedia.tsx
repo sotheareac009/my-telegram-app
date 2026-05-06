@@ -25,6 +25,7 @@ interface GroupMediaProps {
 }
 
 type TabId = "all" | "photo" | "video" | "file";
+type VideoLayout = "landscape" | "portrait";
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   {
@@ -106,6 +107,7 @@ export default function GroupMedia({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [tab, setTab] = useState<TabId>("all");
+  const [videoLayout, setVideoLayout] = useState<VideoLayout>("portrait");
   const [hasMore, setHasMore] = useState(false);
   const [nextOffsetId, setNextOffsetId] = useState(0);
   const [viewer, setViewer] = useState<MediaItem | null>(null);
@@ -162,6 +164,13 @@ export default function GroupMedia({
     file: media.filter((m) => m.type === "file").length,
   };
 
+  const videoGridClass =
+    videoLayout === "portrait"
+      ? "grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
+      : "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5";
+  const videoCardClass =
+    videoLayout === "portrait" ? "aspect-[9/16]" : "aspect-video";
+
   async function handleDownload(item: MediaItem) {
     setDownloadState({
       name: item.fileName || `video_${item.id}.mp4`,
@@ -204,12 +213,12 @@ export default function GroupMedia({
   return (
     <div className="flex h-full flex-col">
       {/* Tabs */}
-      <div className="flex items-center gap-1 border-b border-zinc-200 px-6 dark:border-zinc-800">
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-zinc-200 px-3 sm:px-6 dark:border-zinc-800">
         {TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+            className={`flex shrink-0 items-center gap-2 border-b-2 px-3 py-3 text-sm font-medium transition-colors sm:px-4 ${
               tab === t.id
                 ? "border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400"
                 : "border-transparent text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
@@ -231,13 +240,13 @@ export default function GroupMedia({
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
         {loading ? (
           <div className="space-y-6">
             {/* Photo skeleton */}
             <div>
               <div className="mb-3 h-4 w-16 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700" />
-              <div className="grid grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                 {Array.from({ length: 5 }).map((_, i) => (
                   <div key={i} className="aspect-square animate-pulse rounded-xl bg-zinc-200 dark:bg-zinc-800" />
                 ))}
@@ -288,7 +297,7 @@ export default function GroupMedia({
                     Photos ({photos.length})
                   </h3>
                 )}
-                <div className="grid grid-cols-5 gap-3">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                   {photos.map((item) => (
                     <button
                       key={item.id}
@@ -315,21 +324,57 @@ export default function GroupMedia({
             {/* Videos section */}
             {(tab === "all" || tab === "video") && videos.length > 0 && (
               <section>
-                {tab === "all" && (
-                  <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polygon points="23 7 16 12 23 17 23 7" />
-                      <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-                    </svg>
-                    Videos ({videos.length})
-                  </h3>
-                )}
-                <div className="grid grid-cols-5 gap-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  {tab === "all" ? (
+                    <h3 className="flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="23 7 16 12 23 17 23 7" />
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                      </svg>
+                      Videos ({videos.length})
+                    </h3>
+                  ) : (
+                    <span className="min-w-0" />
+                  )}
+                  <div className="flex shrink-0 rounded-xl border border-zinc-200 bg-white p-1 dark:border-zinc-800 dark:bg-zinc-900">
+                    <button
+                      type="button"
+                      onClick={() => setVideoLayout("landscape")}
+                      aria-label="Landscape video layout"
+                      title="Landscape"
+                      className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+                        videoLayout === "landscape"
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                      }`}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="6" width="18" height="12" rx="2" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setVideoLayout("portrait")}
+                      aria-label="Portrait video layout"
+                      title="Portrait"
+                      className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+                        videoLayout === "portrait"
+                          ? "bg-blue-600 text-white shadow-sm"
+                          : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                      }`}
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="7" y="3" width="10" height="18" rx="2" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                <div className={videoGridClass}>
                   {videos.map((item) => (
                     <button
                       key={item.id}
                       onClick={() => setViewer(item)}
-                      className="group relative aspect-video overflow-hidden rounded-xl border border-zinc-200 bg-zinc-900 transition-all hover:border-blue-300 hover:shadow-lg dark:border-zinc-800"
+                      className={`group relative ${videoCardClass} overflow-hidden rounded-xl border border-zinc-200 bg-zinc-900 transition-all hover:border-blue-300 hover:shadow-lg dark:border-zinc-800`}
                     >
                       <Thumbnail
                         session={session}
@@ -408,7 +453,7 @@ export default function GroupMedia({
                     <button
                       key={item.id}
                       onClick={() => setViewer(item)}
-                      className="flex w-full items-center gap-4 rounded-xl border border-zinc-200 bg-white p-4 text-left transition-all hover:border-blue-200 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-blue-800"
+                      className="flex w-full min-w-0 items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3 text-left transition-all hover:border-blue-200 hover:shadow-md sm:gap-4 sm:p-4 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-blue-800"
                     >
                       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500/10 to-orange-500/10 dark:from-amber-500/20 dark:to-orange-500/20">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-amber-600 dark:text-amber-400">
@@ -416,16 +461,16 @@ export default function GroupMedia({
                           <polyline points="14 2 14 8 20 8" />
                         </svg>
                       </div>
-                      <div className="flex-1 overflow-hidden">
+                      <div className="min-w-0 flex-1 overflow-hidden">
                         <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
                           {item.fileName || "Unknown file"}
                         </p>
-                        <p className="mt-0.5 text-xs text-zinc-500">
+                        <p className="mt-0.5 truncate text-xs text-zinc-500">
                           {formatFileSize(item.fileSize)}
                           {item.mimeType && ` · ${item.mimeType}`}
                         </p>
                       </div>
-                      <span className="text-xs text-zinc-400">
+                      <span className="hidden shrink-0 text-xs text-zinc-400 sm:block">
                         {formatDate(item.date)}
                       </span>
                     </button>

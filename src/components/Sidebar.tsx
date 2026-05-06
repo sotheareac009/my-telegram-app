@@ -53,12 +53,12 @@ export default function Sidebar({
 }: SidebarProps) {
   return (
     <aside
-      className={`flex flex-col border-r border-zinc-200 bg-white transition-all duration-300 dark:border-zinc-800 dark:bg-zinc-950 ${
+      className={`fixed inset-x-0 bottom-0 z-40 flex h-16 flex-row border-t border-zinc-200 bg-white transition-all duration-300 md:static md:h-auto md:flex-col md:border-r md:border-t-0 dark:border-zinc-800 dark:bg-zinc-950 ${
         collapsed ? "w-[72px]" : "w-60"
-      }`}
+      } max-md:w-full`}
     >
       {/* Toggle */}
-      <div className="flex h-16 items-center border-b border-zinc-200 px-4 dark:border-zinc-800">
+      <div className="hidden h-16 items-center border-b border-zinc-200 px-4 md:flex dark:border-zinc-800">
         <button
           onClick={onToggle}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
@@ -77,28 +77,32 @@ export default function Sidebar({
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 space-y-1 p-3">
+      <nav className="grid flex-1 grid-cols-3 gap-1 p-2 md:block md:space-y-1 md:p-3">
         {menuItems.map((item) => {
           const isActive = activeMenu === item.id;
           return (
             <button
               key={item.id}
               onClick={() => onMenuChange(item.id)}
-              className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 transition-all ${
+              className={`group flex w-full flex-col items-center justify-center gap-1 rounded-xl px-2 py-2 text-center transition-all md:flex-row md:justify-start md:gap-3 md:px-3 md:py-2.5 md:text-left ${
                 isActive
                   ? "bg-blue-50 text-blue-600 shadow-sm dark:bg-blue-950/40 dark:text-blue-400"
                   : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100"
-              } ${collapsed ? "justify-center" : ""}`}
+              } ${collapsed ? "md:justify-center" : ""}`}
               title={collapsed ? item.label : undefined}
             >
               <span className={isActive ? "text-blue-600 dark:text-blue-400" : "text-zinc-400 group-hover:text-zinc-600 dark:group-hover:text-zinc-300"}>
                 {item.icon}
               </span>
-              {!collapsed && (
-                <span className="text-sm font-medium">{item.label}</span>
-              )}
+              <span
+                className={`text-[11px] font-medium leading-none md:text-sm ${
+                  collapsed ? "md:hidden" : ""
+                }`}
+              >
+                {item.label}
+              </span>
               {isActive && !collapsed && (
-                <span className="ml-auto h-1.5 w-1.5 rounded-full bg-blue-500" />
+                <span className="ml-auto hidden h-1.5 w-1.5 rounded-full bg-blue-500 md:block" />
               )}
             </button>
           );
@@ -107,7 +111,7 @@ export default function Sidebar({
 
       {/* Footer */}
       {!collapsed && (
-        <div className="border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        <div className="hidden border-t border-zinc-200 px-4 py-3 md:block dark:border-zinc-800">
           <p className="text-[11px] text-zinc-400">Telegram Client v1.0</p>
         </div>
       )}

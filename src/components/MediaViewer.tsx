@@ -120,11 +120,11 @@ export default function MediaViewer({
   }, [url]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm sm:p-6">
       {/* Close button */}
       <button
         onClick={onClose}
-        className="absolute right-4 top-4 z-50 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+        className="absolute right-3 top-3 z-50 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 sm:right-4 sm:top-4"
       >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <line x1="18" y1="6" x2="6" y2="18" />
@@ -133,7 +133,7 @@ export default function MediaViewer({
       </button>
 
       {/* Content */}
-      <div className="flex max-h-[90vh] max-w-[90vw] flex-col items-center gap-4">
+      <div className="flex max-h-[90dvh] w-full max-w-[90rem] flex-col items-center gap-4 overflow-hidden">
         {loading && (
           <div className="flex flex-col items-center gap-3">
             <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
@@ -151,17 +151,18 @@ export default function MediaViewer({
           <img
             src={url}
             alt={caption || fileName}
-            className="max-h-[80vh] max-w-[85vw] rounded-lg object-contain shadow-2xl"
+            className="max-h-[78dvh] max-w-full rounded-lg object-contain shadow-2xl"
           />
         )}
 
         {url && type === "video" && (
-          <div className="flex flex-col items-center gap-4">
+          <div className="flex w-full flex-col items-center gap-4">
             <video
               src={url}
               controls
               autoPlay
-              className="max-h-[80vh] max-w-[85vw] rounded-lg shadow-2xl"
+              muted
+              className="max-h-[72dvh] w-full max-w-5xl rounded-lg shadow-2xl"
             />
             <button
               type="button"
@@ -176,14 +177,16 @@ export default function MediaViewer({
         )}
 
         {url && type === "file" && (
-          <div className="flex flex-col items-center gap-4 rounded-2xl bg-zinc-900 p-8">
+          <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl bg-zinc-900 p-6 sm:p-8">
             <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-800">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-zinc-400">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                 <polyline points="14 2 14 8 20 8" />
               </svg>
             </div>
-            <p className="text-sm font-medium text-white">{fileName}</p>
+            <p className="max-w-full truncate text-sm font-medium text-white">
+              {fileName}
+            </p>
             <a
               href={url}
               download={fileName}
@@ -195,7 +198,9 @@ export default function MediaViewer({
         )}
 
         {caption && (
-          <p className="max-w-lg text-center text-sm text-white/70">{caption}</p>
+          <p className="max-w-full text-center text-sm text-white/70 sm:max-w-lg">
+            {caption}
+          </p>
         )}
       </div>
 

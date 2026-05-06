@@ -14,9 +14,9 @@ export default function DownloadProgressAlert({
   const isIndeterminate = progress === null;
 
   return (
-    <div className="fixed bottom-5 right-5 z-[70] w-80 rounded-2xl border border-zinc-200 bg-white/95 p-4 shadow-2xl backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
+    <div className="fixed inset-x-4 bottom-20 z-[70] rounded-2xl border border-zinc-200 bg-white/95 p-4 shadow-2xl backdrop-blur sm:bottom-5 sm:left-auto sm:right-5 sm:w-80 dark:border-zinc-800 dark:bg-zinc-900/95">
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
             {error ? "Download failed" : "Downloading"}
           </p>

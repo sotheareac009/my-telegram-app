@@ -58,7 +58,7 @@ export default function Dashboard({ user, session, onSignOut }: DashboardProps) 
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-950">
-      <Header user={user} onSignOut={onSignOut} />
+      <Header user={user} session={session} onSignOut={onSignOut} />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar
           activeMenu={activeMenu}

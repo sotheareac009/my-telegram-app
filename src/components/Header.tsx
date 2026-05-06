@@ -12,11 +12,22 @@ interface UserInfo {
 
 interface HeaderProps {
   user: UserInfo;
+  session: string;
   onSignOut: () => void;
 }
 
-export default function Header({ user, onSignOut }: HeaderProps) {
+function InitialsAvatar({ initials }: { initials: string }) {
+  return (
+    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 text-xs font-bold text-white shadow-sm">
+      {initials}
+    </div>
+  );
+}
+
+export default function Header({ user, session, onSignOut }: HeaderProps) {
   const [open, setOpen] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoFailed, setPhotoFailed] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -31,6 +42,56 @@ export default function Header({ user, onSignOut }: HeaderProps) {
 
   const initials =
     (user.firstName?.[0] ?? "") + (user.lastName?.[0] ?? "") || "U";
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+
+    async function loadPhoto() {
+      setPhotoFailed(false);
+      setPhotoUrl(null);
+
+      try {
+        const res = await fetch("/api/telegram/profile-photo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionString: session }),
+        });
+
+        if (!res.ok) {
+          if (!cancelled) setPhotoFailed(true);
+          return;
+        }
+
+        const blob = await res.blob();
+        objectUrl = URL.createObjectURL(blob);
+        if (!cancelled) {
+          setPhotoUrl(objectUrl);
+        }
+      } catch {
+        if (!cancelled) setPhotoFailed(true);
+      }
+    }
+
+    void loadPhoto();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [session]);
+
+  const profileAvatar =
+    photoUrl && !photoFailed ? (
+      <img
+        src={photoUrl}
+        alt={user.firstName ?? "Profile"}
+        onError={() => setPhotoFailed(true)}
+        className="h-8 w-8 shrink-0 rounded-full object-cover shadow-sm"
+      />
+    ) : (
+      <InitialsAvatar initials={initials} />
+    );
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-between border-b border-zinc-200 bg-white/80 px-4 backdrop-blur-xl sm:h-16 sm:px-6 dark:border-zinc-800 dark:bg-zinc-950/80">
@@ -61,9 +122,7 @@ export default function Header({ user, onSignOut }: HeaderProps) {
           onClick={() => setOpen(!open)}
           className="flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-2 transition-colors hover:bg-zinc-100 sm:gap-2.5 sm:pr-3 dark:hover:bg-zinc-800"
         >
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 text-xs font-bold text-white shadow-sm">
-            {initials}
-          </div>
+          {profileAvatar}
           <span className="hidden text-sm font-medium text-zinc-700 dark:text-zinc-300 sm:block">
             {user.firstName ?? "User"}
           </span>

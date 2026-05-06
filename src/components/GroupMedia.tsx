@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import DownloadProgressAlert from "./DownloadProgressAlert";
 import MediaViewer from "./MediaViewer";
 import Thumbnail from "./Thumbnail";
+import { downloadTelegramMedia } from "@/lib/downloadTelegramMedia";
 
 interface MediaItem {
   id: number;
@@ -107,6 +109,11 @@ export default function GroupMedia({
   const [hasMore, setHasMore] = useState(false);
   const [nextOffsetId, setNextOffsetId] = useState(0);
   const [viewer, setViewer] = useState<MediaItem | null>(null);
+  const [downloadState, setDownloadState] = useState<{
+    name: string;
+    progress: number | null;
+    error?: string;
+  } | null>(null);
 
   useEffect(() => {
     fetchMedia(0, true);
@@ -154,6 +161,45 @@ export default function GroupMedia({
     video: media.filter((m) => m.type === "video").length,
     file: media.filter((m) => m.type === "file").length,
   };
+
+  async function handleDownload(item: MediaItem) {
+    setDownloadState({
+      name: item.fileName || `video_${item.id}.mp4`,
+      progress: 0,
+    });
+
+    try {
+      await downloadTelegramMedia({
+        session,
+        groupId,
+        messageId: item.id,
+        fileName: item.fileName || `video_${item.id}.mp4`,
+        onProgress: (progress) => {
+          setDownloadState((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  progress,
+                }
+              : prev
+          );
+        },
+      });
+
+      setTimeout(() => {
+        setDownloadState(null);
+      }, 900);
+    } catch {
+      setDownloadState((prev) =>
+        prev
+          ? {
+              ...prev,
+              error: "The file could not be downloaded.",
+            }
+          : null
+      );
+    }
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -315,6 +361,30 @@ export default function GroupMedia({
                           {formatFileSize(item.fileSize)}
                         </span>
                       )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleDownload(item);
+                        }}
+                        className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity hover:bg-black/85 group-hover:opacity-100"
+                        aria-label={`Download ${item.fileName || "video"}`}
+                      >
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                          <polyline points="7 10 12 15 17 10" />
+                          <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                      </button>
                     </button>
                   ))}
                 </div>
@@ -398,6 +468,14 @@ export default function GroupMedia({
           fileName={viewer.fileName}
           caption={viewer.caption}
           onClose={() => setViewer(null)}
+        />
+      )}
+
+      {downloadState && (
+        <DownloadProgressAlert
+          title={downloadState.name}
+          progress={downloadState.progress}
+          error={downloadState.error}
         />
       )}
     </div>

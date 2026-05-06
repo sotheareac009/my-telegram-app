@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import DownloadProgressAlert from "./DownloadProgressAlert";
+import { downloadTelegramMedia } from "@/lib/downloadTelegramMedia";
 
 interface MediaViewerProps {
   session: string;
@@ -24,38 +26,98 @@ export default function MediaViewer({
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [downloadState, setDownloadState] = useState<{
+    name: string;
+    progress: number | null;
+    error?: string;
+  } | null>(null);
+
+  async function handleDownload() {
+    setDownloadState({
+      name: fileName || `video_${messageId}.mp4`,
+      progress: 0,
+    });
+
+    try {
+      await downloadTelegramMedia({
+        session,
+        groupId,
+        messageId,
+        fileName: fileName || `video_${messageId}.mp4`,
+        onProgress: (progress) => {
+          setDownloadState((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  progress,
+                }
+              : prev
+          );
+        },
+      });
+
+      setTimeout(() => {
+        setDownloadState(null);
+      }, 900);
+    } catch {
+      setDownloadState((prev) =>
+        prev
+          ? {
+              ...prev,
+              error: "The file could not be downloaded.",
+            }
+          : null
+      );
+    }
+  }
 
   useEffect(() => {
-    loadMedia();
+    let cancelled = false;
+
+    async function run() {
+      try {
+        const res = await fetch("/api/telegram/download", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionString: session, groupId, messageId }),
+        });
+        if (!res.ok) {
+          if (!cancelled) {
+            setError("Failed to load media");
+            setLoading(false);
+          }
+          return;
+        }
+        const blob = await res.blob();
+        if (!cancelled) {
+          setUrl(URL.createObjectURL(blob));
+          setLoading(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setError("Failed to load media");
+          setLoading(false);
+        }
+      }
+    }
+
+    void run();
+
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
     }
     document.addEventListener("keydown", handleKey);
     return () => {
+      cancelled = true;
       document.removeEventListener("keydown", handleKey);
+    };
+  }, [groupId, messageId, onClose, session]);
+
+  useEffect(() => {
+    return () => {
       if (url) URL.revokeObjectURL(url);
     };
-  }, []);
-
-  async function loadMedia() {
-    try {
-      const res = await fetch("/api/telegram/download", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionString: session, groupId, messageId }),
-      });
-      if (!res.ok) {
-        setError("Failed to load media");
-        return;
-      }
-      const blob = await res.blob();
-      setUrl(URL.createObjectURL(blob));
-    } catch {
-      setError("Failed to load media");
-    } finally {
-      setLoading(false);
-    }
-  }
+  }, [url]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
@@ -94,12 +156,23 @@ export default function MediaViewer({
         )}
 
         {url && type === "video" && (
-          <video
-            src={url}
-            controls
-            autoPlay
-            className="max-h-[80vh] max-w-[85vw] rounded-lg shadow-2xl"
-          />
+          <div className="flex flex-col items-center gap-4">
+            <video
+              src={url}
+              controls
+              autoPlay
+              className="max-h-[80vh] max-w-[85vw] rounded-lg shadow-2xl"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                void handleDownload();
+              }}
+              className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+            >
+              Download Video
+            </button>
+          </div>
         )}
 
         {url && type === "file" && (
@@ -125,6 +198,14 @@ export default function MediaViewer({
           <p className="max-w-lg text-center text-sm text-white/70">{caption}</p>
         )}
       </div>
+
+      {downloadState && (
+        <DownloadProgressAlert
+          title={downloadState.name}
+          progress={downloadState.progress}
+          error={downloadState.error}
+        />
+      )}
     </div>
   );
 }

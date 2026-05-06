@@ -47,7 +47,7 @@ export async function downloadTelegramMedia({
 
   const total = Number(res.headers.get("content-length")) || 0;
   const reader = res.body.getReader();
-  const chunks: Uint8Array[] = [];
+  const chunks: ArrayBuffer[] = [];
   let received = 0;
 
   while (true) {
@@ -55,7 +55,7 @@ export async function downloadTelegramMedia({
     if (done) break;
     if (!value) continue;
 
-    chunks.push(value);
+    chunks.push(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
     received += value.length;
 
     if (total > 0) {

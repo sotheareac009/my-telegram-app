@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import DialogAvatar from "./DialogAvatar";
 
 interface Group {
   id: string;
@@ -61,35 +62,46 @@ export default function GroupsGrid({ session, type, onGroupSelect }: GroupsGridP
 
   useEffect(() => {
     if (!session) return;
-    fetchGroups();
-  }, [session]);
 
-  useEffect(() => {
-    setPage(1);
-  }, [search, type]);
+    let cancelled = false;
 
-  async function fetchGroups() {
-    try {
-      const res = await fetch("/api/telegram/dialogs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionString: session }),
-      });
-      const data = await res.json();
-      if (data.groups) setGroups(data.groups);
-    } catch {
-      // silently fail
-    } finally {
-      setLoading(false);
+    async function run() {
+      try {
+        const res = await fetch("/api/telegram/dialogs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionString: session }),
+        });
+        const data = await res.json();
+        if (!cancelled && data.groups) {
+          setGroups(data.groups);
+        }
+      } catch {
+        // silently fail
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
     }
-  }
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
 
   const filtered = groups
     .filter((g) => (type === "channels" ? g.isChannel : g.isGroup))
     .filter((g) => g.title.toLowerCase().includes(search.toLowerCase()));
 
   const totalPages = Math.ceil(filtered.length / perPage);
-  const paginated = filtered.slice((page - 1) * perPage, page * perPage);
+  const currentPage = Math.min(page, Math.max(totalPages, 1));
+  const paginated = filtered.slice(
+    (currentPage - 1) * perPage,
+    currentPage * perPage
+  );
 
   // Split into rows of 5
   const rows: Group[][] = [];
@@ -132,7 +144,10 @@ export default function GroupsGrid({ session, type, onGroupSelect }: GroupsGridP
             type="text"
             placeholder={`Search ${title.toLowerCase()}...`}
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
             className="h-10 w-full rounded-xl border border-zinc-200 bg-white pl-10 pr-4 text-sm outline-none transition-all focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-800/80"
           />
         </div>
@@ -182,7 +197,7 @@ export default function GroupsGrid({ session, type, onGroupSelect }: GroupsGridP
               <div key={rowIndex} className="grid grid-cols-5 gap-4">
                 {row.map((group, colIndex) => {
                   const globalIndex =
-                    (page - 1) * perPage + rowIndex * 5 + colIndex;
+                    (currentPage - 1) * perPage + rowIndex * 5 + colIndex;
                   return (
                     <button
                       key={group.id}
@@ -199,13 +214,12 @@ export default function GroupsGrid({ session, type, onGroupSelect }: GroupsGridP
                       )}
 
                       {/* Avatar */}
-                      <div
-                        className={`flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br ${getGradient(
-                          globalIndex
-                        )} text-lg font-bold text-white shadow-md`}
-                      >
-                        {group.title[0]?.toUpperCase()}
-                      </div>
+                      <DialogAvatar
+                        session={session}
+                        groupId={group.id}
+                        title={group.title}
+                        fallbackClassName={getGradient(globalIndex)}
+                      />
 
                       {/* Info */}
                       <div className="w-full text-center">
@@ -257,9 +271,9 @@ export default function GroupsGrid({ session, type, onGroupSelect }: GroupsGridP
           {Array.from({ length: totalPages }).map((_, i) => (
             <button
               key={i}
-              onClick={() => setPage(i + 1)}
-              className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium transition-colors ${
-                page === i + 1
+            onClick={() => setPage(i + 1)}
+            className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium transition-colors ${
+                currentPage === i + 1
                   ? "bg-blue-600 text-white shadow-sm"
                   : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
               }`}

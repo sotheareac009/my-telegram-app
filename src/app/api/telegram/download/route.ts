@@ -48,6 +48,7 @@ async function downloadMediaResponse(
     return new Response(data as unknown as BodyInit, {
       headers: {
         "Content-Type": mimeType,
+        "Content-Length": String(data.byteLength),
         "Content-Disposition": `${mode}; filename="${fileName}"`,
         "Cache-Control": "private, max-age=3600",
       },

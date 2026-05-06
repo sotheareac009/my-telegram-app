@@ -25,6 +25,7 @@ export default function MediaViewer({
 }: MediaViewerProps) {
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadProgress, setLoadProgress] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [downloadState, setDownloadState] = useState<{
     name: string;
@@ -85,18 +86,54 @@ export default function MediaViewer({
           if (!cancelled) {
             setError("Failed to load media");
             setLoading(false);
+            setLoadProgress(null);
           }
           return;
         }
-        const blob = await res.blob();
+
+        const total = Number(res.headers.get("content-length"));
+        if (!res.body || !Number.isFinite(total) || total <= 0) {
+          const blob = await res.blob();
+          if (!cancelled) {
+            setUrl(URL.createObjectURL(blob));
+            setLoading(false);
+            setLoadProgress(null);
+          }
+          return;
+        }
+
+        const reader = res.body.getReader();
+        const chunks: ArrayBuffer[] = [];
+        let received = 0;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!value) continue;
+
+          const chunk = new ArrayBuffer(value.byteLength);
+          new Uint8Array(chunk).set(value);
+          chunks.push(chunk);
+          received += value.byteLength;
+
+          if (!cancelled && type === "video") {
+            setLoadProgress(Math.min(100, Math.round((received / total) * 100)));
+          }
+        }
+
+        const blob = new Blob(chunks, {
+          type: res.headers.get("content-type") || "application/octet-stream",
+        });
         if (!cancelled) {
           setUrl(URL.createObjectURL(blob));
           setLoading(false);
+          setLoadProgress(null);
         }
       } catch {
         if (!cancelled) {
           setError("Failed to load media");
           setLoading(false);
+          setLoadProgress(null);
         }
       }
     }
@@ -111,7 +148,7 @@ export default function MediaViewer({
       cancelled = true;
       document.removeEventListener("keydown", handleKey);
     };
-  }, [groupId, messageId, onClose, session]);
+  }, [groupId, messageId, onClose, session, type]);
 
   useEffect(() => {
     return () => {
@@ -135,9 +172,30 @@ export default function MediaViewer({
       {/* Content */}
       <div className="flex max-h-[90dvh] w-full max-w-[90rem] flex-col items-center gap-4 overflow-hidden">
         {loading && (
-          <div className="flex flex-col items-center gap-3">
+          <div className="flex w-full max-w-sm flex-col items-center gap-3">
             <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
             <p className="text-sm text-white/60">Loading media...</p>
+            {type === "video" && (
+              <div className="w-full">
+                <div className="h-2 overflow-hidden rounded-full bg-white/15">
+                  <div
+                    className={`h-full rounded-full bg-blue-500 transition-[width,transform] duration-300 ${
+                      loadProgress === null
+                        ? "w-1/3 animate-[shimmer_1.2s_infinite]"
+                        : ""
+                    }`}
+                    style={
+                      loadProgress === null
+                        ? undefined
+                        : { width: `${loadProgress}%` }
+                    }
+                  />
+                </div>
+                <p className="mt-2 text-center text-xs text-white/50">
+                  {loadProgress === null ? "Preparing video..." : `${loadProgress}%`}
+                </p>
+              </div>
+            )}
           </div>
         )}
 

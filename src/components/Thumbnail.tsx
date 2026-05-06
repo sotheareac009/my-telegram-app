@@ -23,6 +23,7 @@ export default function Thumbnail({
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
     "loading"
   );
+  const [imageLoaded, setImageLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -41,7 +42,9 @@ export default function Thumbnail({
         });
         if (!res.ok) {
           if (!cancelled) {
-            setStatus(fallbackSrc ? "ready" : "error");
+            if (!fallbackSrc) {
+              setStatus("error");
+            }
           }
           return;
         }
@@ -49,11 +52,12 @@ export default function Thumbnail({
         if (!cancelled) {
           objectUrl = URL.createObjectURL(blob);
           setUrl(objectUrl);
-          setStatus("ready");
         }
       } catch {
         if (!cancelled) {
-          setStatus(fallbackSrc ? "ready" : "error");
+          if (!fallbackSrc) {
+            setStatus("error");
+          }
         }
       }
     }
@@ -68,16 +72,53 @@ export default function Thumbnail({
   }, [fallbackSrc, session, groupId, messageId]);
 
   const imageSrc = url || fallbackSrc;
+  const showSkeleton = status === "loading" || (!!imageSrc && !imageLoaded);
 
-  if (!imageSrc) {
+  if (!imageSrc || showSkeleton) {
     return (
-      <div
-        className={`flex items-center justify-center bg-gradient-to-br from-zinc-200 to-zinc-300 dark:from-zinc-700 dark:to-zinc-800 ${className}`}
-      >
-        {status === "loading" && (
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-zinc-400 border-t-zinc-600" />
+      <>
+        {imageSrc && (
+          <img
+            src={imageSrc}
+            alt={alt}
+            onLoad={() => {
+              setImageLoaded(true);
+              setStatus("ready");
+            }}
+            onError={() => {
+              setImageLoaded(false);
+              setStatus("error");
+            }}
+            className={`hidden object-cover ${className}`}
+          />
         )}
-      </div>
+        <div
+          className={`relative overflow-hidden bg-zinc-200 dark:bg-zinc-800 ${className}`}
+        >
+          {status === "error" ? (
+            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-zinc-200 to-zinc-300 dark:from-zinc-700 dark:to-zinc-800">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                className="text-zinc-400 dark:text-zinc-500"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+            </div>
+          ) : (
+          <>
+            <div className="absolute inset-0 animate-pulse bg-zinc-200 dark:bg-zinc-800" />
+            <div className="absolute inset-y-0 -left-1/2 w-1/2 animate-[shimmer_1.6s_infinite] bg-gradient-to-r from-transparent via-white/40 to-transparent dark:via-white/10" />
+          </>
+          )}
+        </div>
+      </>
     );
   }
 
@@ -85,6 +126,7 @@ export default function Thumbnail({
     <img
       src={imageSrc}
       alt={alt}
+      onError={() => setStatus("error")}
       className={`object-cover ${className}`}
     />
   );

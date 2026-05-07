@@ -116,22 +116,22 @@ function formatDate(timestamp: number): string {
 
 function AlbumBadge({ count }: { count: number }) {
   return (
-    <span className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-medium text-white">
-      <svg
-        width="11"
-        height="11"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <rect x="2" y="6" width="14" height="14" rx="2" />
-        <path d="M6 6V4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-2" />
-      </svg>
-      {count}
-    </span>
+    <>
+      <div className="pointer-events-none absolute inset-x-3 -top-2 z-0 h-3 rounded-t-xl border border-black/35 bg-transparent shadow-sm dark:border-white/25" />
+      <div className="pointer-events-none absolute inset-x-1.5 -top-1 z-0 h-3 rounded-t-xl border border-black/40 bg-transparent shadow-sm dark:border-white/30" />
+      <span className="pointer-events-none absolute bottom-2 right-2 z-20 flex items-center gap-1 rounded bg-black/80 px-1.5 py-1 text-[10px] font-semibold leading-none text-white backdrop-blur-sm">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path d="M4 5h11v2H4V5Zm0 4h11v2H4V9Zm0 4h7v2H4v-2Zm10.5-1.5L20 15l-5.5 3.5v-7Z" />
+        </svg>
+        {count}
+      </span>
+    </>
   );
 }
 
@@ -526,21 +526,25 @@ export default function GroupMedia({
                     <button
                       key={item.id}
                       onClick={() => openItem(item)}
-                      className="group relative aspect-square overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 transition-all hover:border-blue-300 hover:shadow-lg dark:border-zinc-800 dark:bg-zinc-800"
+                      className={`group relative aspect-square cursor-pointer rounded-xl border border-zinc-200 bg-zinc-100 transition-all hover:border-blue-300 hover:shadow-lg dark:border-zinc-800 dark:bg-zinc-800 ${
+                        item.album ? "overflow-visible" : "overflow-hidden"
+                      }`}
                     >
-                      <Thumbnail
-                        session={session}
-                        groupId={groupId}
-                        messageId={item.id}
-                        alt={item.caption}
-                        className="h-full w-full transition-transform group-hover:scale-105"
-                      />
                       {item.album && (
                         <AlbumBadge count={item.album.items.length} />
                       )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-                      <div className="absolute bottom-2 left-2 right-2 truncate text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100">
-                        {item.caption || formatDate(item.date)}
+                      <div className="relative z-10 h-full w-full overflow-hidden rounded-xl">
+                        <Thumbnail
+                          session={session}
+                          groupId={groupId}
+                          messageId={item.id}
+                          alt={item.caption}
+                          className="h-full w-full transition-transform group-hover:scale-105"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+                        <div className="absolute bottom-2 left-2 right-2 truncate text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100">
+                          {item.caption || formatDate(item.date)}
+                        </div>
                       </div>
                     </button>
                   ))}
@@ -574,51 +578,58 @@ export default function GroupMedia({
                     <button
                       key={item.id}
                       onClick={() => openItem(item)}
-                      className={`group relative ${videoCardClass} overflow-hidden rounded-xl border border-zinc-200 bg-zinc-900 transition-all hover:border-blue-300 hover:shadow-lg dark:border-zinc-800`}
+                      className={`group relative ${videoCardClass} cursor-pointer rounded-xl border border-zinc-200 bg-zinc-900 transition-all hover:border-blue-300 hover:shadow-lg dark:border-zinc-800 ${
+                        item.album ? "overflow-visible" : "overflow-hidden"
+                      }`}
                     >
-                      <Thumbnail
-                        session={session}
-                        groupId={groupId}
-                        messageId={item.id}
-                        alt={item.caption || item.fileName}
-                        fallbackSrc={
-                          item.thumbBase64
-                            ? `data:image/jpeg;base64,${item.thumbBase64}`
-                            : ""
-                        }
-                        className="h-full w-full transition-transform group-hover:scale-105"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-black/20" />
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm transition-transform group-hover:scale-110">
-                          <svg width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="none">
-                            <polygon points="5 3 19 12 5 21 5 3" />
-                          </svg>
-                        </div>
-                      </div>
-                      {item.duration > 0 && (
-                        <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-medium text-white">
-                          {formatDuration(item.duration)}
-                        </span>
-                      )}
-                      {item.album ? (
+                      {item.album && (
                         <AlbumBadge count={item.album.items.length} />
-                      ) : (
-                        item.fileSize > 0 && (
+                      )}
+                      <div className="relative z-10 h-full w-full overflow-hidden rounded-xl">
+                        <Thumbnail
+                          session={session}
+                          groupId={groupId}
+                          messageId={item.id}
+                          alt={item.caption || item.fileName}
+                          fallbackSrc={
+                            item.thumbBase64
+                              ? `data:image/jpeg;base64,${item.thumbBase64}`
+                              : ""
+                          }
+                          className="h-full w-full transition-transform group-hover:scale-105"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-black/20" />
+                        {!item.album && (
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm transition-transform group-hover:scale-110">
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="none">
+                                <polygon points="5 3 19 12 5 21 5 3" />
+                              </svg>
+                            </div>
+                          </div>
+                        )}
+                        {item.duration > 0 && (
+                          <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                            {formatDuration(item.duration)}
+                          </span>
+                        )}
+                        {!item.album && item.fileSize > 0 && (
                           <span className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white/70">
                             {formatFileSize(item.fileSize)}
                           </span>
-                        )
-                      )}
-                      <a
-                        href={buildDownloadUrl(session, groupId, item.id)}
-                        download={downloadFileName(item)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity hover:bg-black/85 group-hover:opacity-100"
-                        aria-label={`Download ${downloadFileName(item)}`}
-                      >
-                        <DownloadIcon />
-                      </a>
+                        )}
+                        {!item.album && (
+                          <a
+                            href={buildDownloadUrl(session, groupId, item.id)}
+                            download={downloadFileName(item)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity hover:bg-black/85 group-hover:opacity-100"
+                            aria-label={`Download ${downloadFileName(item)}`}
+                          >
+                            <DownloadIcon />
+                          </a>
+                        )}
+                      </div>
                     </button>
                   ))}
                 </div>

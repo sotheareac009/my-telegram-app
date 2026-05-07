@@ -43,6 +43,9 @@ interface GroupMediaProps {
 type TabId = "all" | "photo" | "video" | "file";
 type VideoLayout = "landscape" | "portrait";
 
+const VIDEO_LAYOUT_STORAGE_KEY = "telegram-media-video-layout";
+const ALBUM_LAYOUT_STORAGE_KEY = "telegram-media-album-layout";
+
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   {
     id: "all",
@@ -114,11 +117,75 @@ function formatDate(timestamp: number): string {
   });
 }
 
-function AlbumBadge({ count }: { count: number }) {
+function AlbumPreviewLayer({
+  item,
+  session,
+  groupId,
+  className,
+}: {
+  item?: SingleMediaItem;
+  session: string;
+  groupId: string;
+  className: string;
+}) {
+  return (
+    <div
+      className={`pointer-events-none absolute z-0 overflow-hidden rounded-t-xl border border-black/35 bg-transparent shadow-sm dark:border-white/25 ${className}`}
+    >
+      {item ? (
+        item.type === "file" ? (
+          <div className="flex h-full w-full items-center justify-center bg-zinc-900/85 text-zinc-500">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+            </svg>
+          </div>
+        ) : (
+          <Thumbnail
+            session={session}
+            groupId={groupId}
+            messageId={item.id}
+            alt={item.caption || item.fileName}
+            fallbackSrc={
+              item.thumbBase64
+                ? `data:image/jpeg;base64,${item.thumbBase64}`
+                : ""
+            }
+            className="h-full w-full opacity-80"
+          />
+        )
+      ) : null}
+    </div>
+  );
+}
+
+function AlbumBadge({
+  count,
+  items,
+  session,
+  groupId,
+}: {
+  count: number;
+  items: SingleMediaItem[];
+  session: string;
+  groupId: string;
+}) {
+  const previews = items.slice(1, 3);
+
   return (
     <>
-      <div className="pointer-events-none absolute inset-x-3 -top-2 z-0 h-3 rounded-t-xl border border-black/35 bg-transparent shadow-sm dark:border-white/25" />
-      <div className="pointer-events-none absolute inset-x-1.5 -top-1 z-0 h-3 rounded-t-xl border border-black/40 bg-transparent shadow-sm dark:border-white/30" />
+      <AlbumPreviewLayer
+        item={previews[1] ?? previews[0]}
+        session={session}
+        groupId={groupId}
+        className="inset-x-3 -top-3 h-5"
+      />
+      <AlbumPreviewLayer
+        item={previews[0]}
+        session={session}
+        groupId={groupId}
+        className="inset-x-1.5 -top-1.5 h-5"
+      />
       <span className="pointer-events-none absolute bottom-2 right-2 z-20 flex items-center gap-1 rounded bg-black/80 px-1.5 py-1 text-[10px] font-semibold leading-none text-white backdrop-blur-sm">
         <svg
           width="12"
@@ -151,6 +218,24 @@ function DownloadIcon() {
       <polyline points="7 10 12 15 17 10" />
       <line x1="12" y1="15" x2="12" y2="3" />
     </svg>
+  );
+}
+
+function SelectionMark({ selected }: { selected: boolean }) {
+  return (
+    <span
+      className={`pointer-events-none absolute left-2 top-2 z-30 flex h-6 w-6 items-center justify-center rounded-full border text-white shadow-sm ${
+        selected
+          ? "border-blue-500 bg-blue-600"
+          : "border-white/70 bg-black/45"
+      }`}
+    >
+      {selected && (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      )}
+    </span>
   );
 }
 
@@ -209,6 +294,33 @@ function downloadFileName(item: SingleMediaItem): string {
   return `file_${item.id}`;
 }
 
+function itemsForSelection(item: MediaItem): SingleMediaItem[] {
+  return item.album ? item.album.items : [item];
+}
+
+function flattenMedia(items: MediaItem[]): SingleMediaItem[] {
+  const seen = new Set<number>();
+  const out: SingleMediaItem[] = [];
+  for (const item of items) {
+    for (const sub of itemsForSelection(item)) {
+      if (seen.has(sub.id)) continue;
+      seen.add(sub.id);
+      out.push(sub);
+    }
+  }
+  return out;
+}
+
+function isVideoLayout(value: string | null): value is VideoLayout {
+  return value === "portrait" || value === "landscape";
+}
+
+function readStoredLayout(key: string, fallback: VideoLayout): VideoLayout {
+  if (typeof window === "undefined") return fallback;
+  const value = window.localStorage.getItem(key);
+  return isVideoLayout(value) ? value : fallback;
+}
+
 export default function GroupMedia({
   session,
   groupId,
@@ -218,14 +330,25 @@ export default function GroupMedia({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [tab, setTab] = useState<TabId>("all");
-  const [videoLayout, setVideoLayout] = useState<VideoLayout>("portrait");
-  const [albumLayout, setAlbumLayout] = useState<VideoLayout>("portrait");
+  const [videoLayout, setVideoLayout] = useState<VideoLayout>(() =>
+    readStoredLayout(VIDEO_LAYOUT_STORAGE_KEY, "portrait")
+  );
+  const [albumLayout, setAlbumLayout] = useState<VideoLayout>(() =>
+    readStoredLayout(ALBUM_LAYOUT_STORAGE_KEY, "portrait")
+  );
   const [hasMore, setHasMore] = useState(false);
   const [nextOffsetId, setNextOffsetId] = useState(0);
   const [viewer, setViewer] = useState<SingleMediaItem | null>(null);
   const [albumView, setAlbumView] = useState<MediaItem | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+  const [linksCopied, setLinksCopied] = useState(false);
 
   function openItem(item: MediaItem) {
+    if (selectionMode) {
+      toggleSelection(itemsForSelection(item));
+      return;
+    }
     if (item.album) {
       setAlbumView(item);
       return;
@@ -236,12 +359,24 @@ export default function GroupMedia({
   }
 
   function openAlbumItem(item: SingleMediaItem) {
+    if (selectionMode) {
+      toggleSelection([item]);
+      return;
+    }
     setViewer(item);
   }
 
   useEffect(() => {
     fetchMedia(0, true);
   }, [session, groupId]);
+
+  useEffect(() => {
+    window.localStorage.setItem(VIDEO_LAYOUT_STORAGE_KEY, videoLayout);
+  }, [videoLayout]);
+
+  useEffect(() => {
+    window.localStorage.setItem(ALBUM_LAYOUT_STORAGE_KEY, albumLayout);
+  }, [albumLayout]);
 
   async function fetchMedia(offsetId: number, reset: boolean) {
     if (reset) setLoading(true);
@@ -291,6 +426,122 @@ export default function GroupMedia({
   const photos = filtered.filter((m) => m.type === "photo");
   const videos = filtered.filter((m) => m.type === "video");
   const files = filtered.filter((m) => m.type === "file");
+  const allMediaItems = flattenMedia(media);
+  const selectedItems = allMediaItems.filter((item) => selectedIds.has(item.id));
+  const selectedCount = selectedItems.length;
+
+  function isSelected(items: SingleMediaItem[]): boolean {
+    return items.length > 0 && items.every((item) => selectedIds.has(item.id));
+  }
+
+  function toggleSelection(items: SingleMediaItem[]) {
+    setLinksCopied(false);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const allSelected = items.every((item) => next.has(item.id));
+      for (const item of items) {
+        if (allSelected) next.delete(item.id);
+        else next.add(item.id);
+      }
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set());
+    setSelectionMode(false);
+    setLinksCopied(false);
+  }
+
+  function selectedDownloadLinks(): string[] {
+    const origin = window.location.origin;
+    return selectedItems.map(
+      (item) => `${origin}${buildDownloadUrl(session, groupId, item.id)}`
+    );
+  }
+
+  async function copySelectedLinks() {
+    const links = selectedDownloadLinks().join("\n");
+    if (!links) return;
+    try {
+      await window.navigator.clipboard.writeText(links);
+    } catch {
+      const el = document.createElement("textarea");
+      el.value = links;
+      el.setAttribute("readonly", "");
+      el.style.position = "fixed";
+      el.style.opacity = "0";
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    }
+    setLinksCopied(true);
+  }
+
+  function exportSelectedLinks() {
+    const links = selectedDownloadLinks().join("\n");
+    if (!links) return;
+    const blob = new Blob([links], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "telegram-media-links.txt";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function downloadSelected() {
+    selectedItems.forEach((item, index) => {
+      window.setTimeout(() => {
+        const a = document.createElement("a");
+        a.href = buildDownloadUrl(session, groupId, item.id);
+        a.download = downloadFileName(item);
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }, index * 150);
+    });
+  }
+
+  function removeSelectedFromLocalList() {
+    if (selectedCount === 0) return;
+    const shouldRemove = (item: SingleMediaItem) => selectedIds.has(item.id);
+    const prune = (items: MediaItem[]): MediaItem[] =>
+      items.flatMap((item) => {
+        if (!item.album) return shouldRemove(item) ? [] : [item];
+        const remaining = item.album.items.filter((sub) => !shouldRemove(sub));
+        if (remaining.length === 0) return [];
+        if (remaining.length === 1) return [remaining[0]];
+        return [
+          {
+            ...remaining[0],
+            album: {
+              groupedId: item.album.groupedId,
+              items: remaining,
+            },
+          },
+        ];
+      });
+
+    setMedia((prev) => prune(prev));
+    setAlbumView((prev) => {
+      if (!prev?.album) return prev;
+      const remaining = prev.album.items.filter((item) => !shouldRemove(item));
+      if (remaining.length === 0) return null;
+      return {
+        ...remaining[0],
+        album: {
+          groupedId: prev.album.groupedId,
+          items: remaining,
+        },
+      };
+    });
+    if (viewer && shouldRemove(viewer)) setViewer(null);
+    clearSelection();
+  }
 
   function countByType(type: SingleMediaItem["type"]): number {
     let n = 0;
@@ -313,6 +564,53 @@ export default function GroupMedia({
     video: countByType("video"),
     file: countByType("file"),
   };
+
+  const selectionToolbar = selectionMode && (
+    <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 px-3 py-2 sm:px-6 dark:border-zinc-800">
+      <span className="mr-auto text-xs font-medium text-zinc-500 dark:text-zinc-400">
+        {selectedCount} selected
+      </span>
+      <button
+        type="button"
+        onClick={downloadSelected}
+        disabled={selectedCount === 0}
+        className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      >
+        Download
+      </button>
+      <button
+        type="button"
+        onClick={copySelectedLinks}
+        disabled={selectedCount === 0}
+        className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      >
+        {linksCopied ? "Copied" : "Copy links"}
+      </button>
+      <button
+        type="button"
+        onClick={exportSelectedLinks}
+        disabled={selectedCount === 0}
+        className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      >
+        Export
+      </button>
+      <button
+        type="button"
+        onClick={removeSelectedFromLocalList}
+        disabled={selectedCount === 0}
+        className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-40 dark:border-red-900/60 dark:text-red-400 dark:hover:bg-red-950/40"
+      >
+        Remove
+      </button>
+      <button
+        type="button"
+        onClick={clearSelection}
+        className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+      >
+        Cancel
+      </button>
+    </div>
+  );
 
   const videoGridClass =
     videoLayout === "portrait"
@@ -368,7 +666,22 @@ export default function GroupMedia({
             onChange={setAlbumLayout}
             label="Album layout"
           />
+          <button
+            type="button"
+            onClick={() => {
+              setSelectionMode((value) => !value);
+              setLinksCopied(false);
+            }}
+            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+              selectionMode
+                ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300"
+                : "border-zinc-200 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            }`}
+          >
+            Select
+          </button>
         </div>
+        {selectionToolbar}
 
         <div className="flex-1 overflow-y-auto p-3 sm:p-6">
           <div className={albumGridClass}>
@@ -377,8 +690,14 @@ export default function GroupMedia({
                 key={item.id}
                 type="button"
                 onClick={() => openAlbumItem(item)}
-                className={`group relative ${albumCardClass} overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 transition-all hover:border-blue-300 hover:shadow-lg dark:border-zinc-800 dark:bg-zinc-800`}
+                aria-pressed={selectionMode ? selectedIds.has(item.id) : undefined}
+                className={`group relative ${albumCardClass} overflow-hidden rounded-xl border bg-zinc-100 transition-all hover:border-blue-300 hover:shadow-lg dark:bg-zinc-800 ${
+                  selectedIds.has(item.id)
+                    ? "border-blue-500 ring-2 ring-blue-500/50"
+                    : "border-zinc-200 dark:border-zinc-800"
+                }`}
               >
+                {selectionMode && <SelectionMark selected={selectedIds.has(item.id)} />}
                 <Thumbnail
                   session={session}
                   groupId={groupId}
@@ -395,18 +714,22 @@ export default function GroupMedia({
                     </div>
                   </div>
                 )}
-                <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-medium text-white">
-                  {i + 1}
-                </span>
-                <a
-                  href={buildDownloadUrl(session, groupId, item.id)}
-                  download={downloadFileName(item)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity hover:bg-black/85 group-hover:opacity-100"
-                  aria-label={`Download ${downloadFileName(item)}`}
-                >
-                  <DownloadIcon />
-                </a>
+                {!selectionMode && (
+                  <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-medium text-white">
+                    {i + 1}
+                  </span>
+                )}
+                {!selectionMode && (
+                  <a
+                    href={buildDownloadUrl(session, groupId, item.id)}
+                    download={downloadFileName(item)}
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity hover:bg-black/85 group-hover:opacity-100"
+                    aria-label={`Download ${downloadFileName(item)}`}
+                  >
+                    <DownloadIcon />
+                  </a>
+                )}
                 {item.type === "video" && item.duration > 0 && (
                   <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-medium text-white">
                     {formatDuration(item.duration)}
@@ -479,7 +802,22 @@ export default function GroupMedia({
             </span>
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => {
+            setSelectionMode((value) => !value);
+            setLinksCopied(false);
+          }}
+          className={`ml-auto shrink-0 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+            selectionMode
+              ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300"
+              : "border-zinc-200 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          }`}
+        >
+          Select
+        </button>
       </div>
+      {selectionToolbar}
 
       {/* Content */}
       <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
@@ -540,32 +878,47 @@ export default function GroupMedia({
                   </h3>
                 )}
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                  {photos.map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => openItem(item)}
-                      className={`group relative aspect-square cursor-pointer rounded-xl border border-zinc-200 bg-zinc-100 transition-all hover:border-blue-300 hover:shadow-lg dark:border-zinc-800 dark:bg-zinc-800 ${
-                        item.album ? "overflow-visible" : "overflow-hidden"
-                      }`}
-                    >
-                      {item.album && (
-                        <AlbumBadge count={item.album.items.length} />
-                      )}
-                      <div className="relative z-10 h-full w-full overflow-hidden rounded-xl">
-                        <Thumbnail
-                          session={session}
-                          groupId={groupId}
-                          messageId={item.id}
-                          alt={item.caption}
-                          className="h-full w-full transition-transform group-hover:scale-105"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-                        <div className="absolute bottom-2 left-2 right-2 truncate text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100">
-                          {item.caption || formatDate(item.date)}
+                  {photos.map((item) => {
+                    const selectable = itemsForSelection(item);
+                    const selected = isSelected(selectable);
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => openItem(item)}
+                        aria-pressed={selectionMode ? selected : undefined}
+                        className={`group relative aspect-square cursor-pointer rounded-xl border bg-zinc-100 transition-all hover:border-blue-300 hover:shadow-lg dark:bg-zinc-800 ${
+                          item.album ? "overflow-visible" : "overflow-hidden"
+                        } ${
+                          selected
+                            ? "border-blue-500 ring-2 ring-blue-500/50"
+                            : "border-zinc-200 dark:border-zinc-800"
+                        }`}
+                      >
+                        {selectionMode && <SelectionMark selected={selected} />}
+                        {item.album && (
+                          <AlbumBadge
+                            count={item.album.items.length}
+                            items={item.album.items}
+                            session={session}
+                            groupId={groupId}
+                          />
+                        )}
+                        <div className="relative z-10 h-full w-full overflow-hidden rounded-xl">
+                          <Thumbnail
+                            session={session}
+                            groupId={groupId}
+                            messageId={item.id}
+                            alt={item.caption}
+                            className="h-full w-full transition-transform group-hover:scale-105"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+                          <div className="absolute bottom-2 left-2 right-2 truncate text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100">
+                            {item.caption || formatDate(item.date)}
+                          </div>
                         </div>
-                      </div>
-                    </button>
-                  ))}
+                      </button>
+                    );
+                  })}
                 </div>
               </section>
             )}
@@ -592,64 +945,79 @@ export default function GroupMedia({
                   />
                 </div>
                 <div className={videoGridClass}>
-                  {videos.map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => openItem(item)}
-                      className={`group relative ${videoCardClass} cursor-pointer rounded-xl border border-zinc-200 bg-zinc-900 transition-all hover:border-blue-300 hover:shadow-lg dark:border-zinc-800 ${
-                        item.album ? "overflow-visible" : "overflow-hidden"
-                      }`}
-                    >
-                      {item.album && (
-                        <AlbumBadge count={item.album.items.length} />
-                      )}
-                      <div className="relative z-10 h-full w-full overflow-hidden rounded-xl">
-                        <Thumbnail
-                          session={session}
-                          groupId={groupId}
-                          messageId={item.id}
-                          alt={item.caption || item.fileName}
-                          fallbackSrc={
-                            item.thumbBase64
-                              ? `data:image/jpeg;base64,${item.thumbBase64}`
-                              : ""
-                          }
-                          className="h-full w-full transition-transform group-hover:scale-105"
-                        />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-black/20" />
-                        {!item.album && (
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm transition-transform group-hover:scale-110">
-                              <svg width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="none">
-                                <polygon points="5 3 19 12 5 21 5 3" />
-                              </svg>
+                  {videos.map((item) => {
+                    const selectable = itemsForSelection(item);
+                    const selected = isSelected(selectable);
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => openItem(item)}
+                        aria-pressed={selectionMode ? selected : undefined}
+                        className={`group relative ${videoCardClass} cursor-pointer rounded-xl border bg-zinc-900 transition-all hover:border-blue-300 hover:shadow-lg ${
+                          item.album ? "overflow-visible" : "overflow-hidden"
+                        } ${
+                          selected
+                            ? "border-blue-500 ring-2 ring-blue-500/50"
+                            : "border-zinc-200 dark:border-zinc-800"
+                        }`}
+                      >
+                        {selectionMode && <SelectionMark selected={selected} />}
+                        {item.album && (
+                          <AlbumBadge
+                            count={item.album.items.length}
+                            items={item.album.items}
+                            session={session}
+                            groupId={groupId}
+                          />
+                        )}
+                        <div className="relative z-10 h-full w-full overflow-hidden rounded-xl">
+                          <Thumbnail
+                            session={session}
+                            groupId={groupId}
+                            messageId={item.id}
+                            alt={item.caption || item.fileName}
+                            fallbackSrc={
+                              item.thumbBase64
+                                ? `data:image/jpeg;base64,${item.thumbBase64}`
+                                : ""
+                            }
+                            className="h-full w-full transition-transform group-hover:scale-105"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-black/20" />
+                          {!item.album && !selectionMode && (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm transition-transform group-hover:scale-110">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="white" stroke="none">
+                                  <polygon points="5 3 19 12 5 21 5 3" />
+                                </svg>
+                              </div>
                             </div>
-                          </div>
-                        )}
-                        {item.duration > 0 && (
-                          <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-medium text-white">
-                            {formatDuration(item.duration)}
-                          </span>
-                        )}
-                        {!item.album && item.fileSize > 0 && (
-                          <span className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white/70">
-                            {formatFileSize(item.fileSize)}
-                          </span>
-                        )}
-                        {!item.album && (
-                          <a
-                            href={buildDownloadUrl(session, groupId, item.id)}
-                            download={downloadFileName(item)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity hover:bg-black/85 group-hover:opacity-100"
-                            aria-label={`Download ${downloadFileName(item)}`}
-                          >
-                            <DownloadIcon />
-                          </a>
-                        )}
-                      </div>
-                    </button>
-                  ))}
+                          )}
+                          {item.duration > 0 && (
+                            <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                              {formatDuration(item.duration)}
+                            </span>
+                          )}
+                          {!item.album && item.fileSize > 0 && (
+                            <span className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white/70">
+                              {formatFileSize(item.fileSize)}
+                            </span>
+                          )}
+                          {!item.album && !selectionMode && (
+                            <a
+                              href={buildDownloadUrl(session, groupId, item.id)}
+                              download={downloadFileName(item)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity hover:bg-black/85 group-hover:opacity-100"
+                              aria-label={`Download ${downloadFileName(item)}`}
+                            >
+                              <DownloadIcon />
+                            </a>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </section>
             )}
@@ -667,39 +1035,49 @@ export default function GroupMedia({
                   </h3>
                 )}
                 <div className="space-y-2">
-                  {files.map((item) => (
-                    <button
-                      key={item.id}
-                      onClick={() => openItem(item)}
-                      className="flex w-full min-w-0 items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3 text-left transition-all hover:border-blue-200 hover:shadow-md sm:gap-4 sm:p-4 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-blue-800"
-                    >
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500/10 to-orange-500/10 dark:from-amber-500/20 dark:to-orange-500/20">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-amber-600 dark:text-amber-400">
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                          <polyline points="14 2 14 8 20 8" />
-                        </svg>
-                      </div>
-                      <div className="min-w-0 flex-1 overflow-hidden">
-                        <p className="flex items-center gap-2 truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                          <span className="truncate">
-                            {item.fileName || "Unknown file"}
-                          </span>
-                          {item.album && (
-                            <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
-                              Album · {item.album.items.length}
+                  {files.map((item) => {
+                    const selectable = itemsForSelection(item);
+                    const selected = isSelected(selectable);
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => openItem(item)}
+                        aria-pressed={selectionMode ? selected : undefined}
+                        className={`relative flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-xl border bg-white p-3 text-left transition-all hover:border-blue-200 hover:shadow-md sm:gap-4 sm:p-4 dark:bg-zinc-900 dark:hover:border-blue-800 ${
+                          selected
+                            ? "border-blue-500 ring-2 ring-blue-500/40"
+                            : "border-zinc-200 dark:border-zinc-800"
+                        }`}
+                      >
+                        {selectionMode && <SelectionMark selected={selected} />}
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500/10 to-orange-500/10 dark:from-amber-500/20 dark:to-orange-500/20">
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-amber-600 dark:text-amber-400">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                          </svg>
+                        </div>
+                        <div className="min-w-0 flex-1 overflow-hidden">
+                          <p className="flex items-center gap-2 truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                            <span className="truncate">
+                              {item.fileName || "Unknown file"}
                             </span>
-                          )}
-                        </p>
-                        <p className="mt-0.5 truncate text-xs text-zinc-500">
-                          {formatFileSize(item.fileSize)}
-                          {item.mimeType && ` · ${item.mimeType}`}
-                        </p>
-                      </div>
-                      <span className="hidden shrink-0 text-xs text-zinc-400 sm:block">
-                        {formatDate(item.date)}
-                      </span>
-                    </button>
-                  ))}
+                            {item.album && (
+                              <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                                Album · {item.album.items.length}
+                              </span>
+                            )}
+                          </p>
+                          <p className="mt-0.5 truncate text-xs text-zinc-500">
+                            {formatFileSize(item.fileSize)}
+                            {item.mimeType && ` · ${item.mimeType}`}
+                          </p>
+                        </div>
+                        <span className="hidden shrink-0 text-xs text-zinc-400 sm:block">
+                          {formatDate(item.date)}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               </section>
             )}

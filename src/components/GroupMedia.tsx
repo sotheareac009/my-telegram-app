@@ -330,6 +330,9 @@ export default function GroupMedia({
 
   if (albumView && albumView.album) {
     const albumItems = albumView.album.items;
+    const viewerIndex = viewer
+      ? albumItems.findIndex((item) => item.id === viewer.id)
+      : -1;
     const photoCount = albumItems.filter((i) => i.type === "photo").length;
     const videoCount = albumItems.filter((i) => i.type === "video").length;
     const fileCount = albumItems.filter((i) => i.type === "file").length;
@@ -428,6 +431,21 @@ export default function GroupMedia({
             fileName={viewer.fileName}
             caption={viewer.caption}
             onClose={() => setViewer(null)}
+            currentIndex={viewerIndex >= 0 ? viewerIndex : undefined}
+            totalItems={albumItems.length}
+            onPrevious={() => {
+              const index = viewerIndex >= 0 ? viewerIndex : 0;
+              const previous =
+                albumItems[(index - 1 + albumItems.length) % albumItems.length];
+              setViewer(previous);
+            }}
+            onNext={() => {
+              const index = viewerIndex >= 0 ? viewerIndex : 0;
+              const next = albumItems[(index + 1) % albumItems.length];
+              setViewer(next);
+            }}
+            items={albumItems}
+            onSelectItem={setViewer}
           />
         )}
       </div>

@@ -14,7 +14,7 @@ function buildDownloadUrl(session: string, groupId: string, messageId: number) {
   return `/api/telegram/download?${params.toString()}`;
 }
 
-interface MediaItem {
+interface SingleMediaItem {
   id: number;
   type: "photo" | "video" | "file";
   date: number;
@@ -25,6 +25,14 @@ interface MediaItem {
   thumbBase64: string;
   duration: number;
 }
+
+interface MediaItem extends SingleMediaItem {
+  album?: {
+    groupedId: string;
+    items: SingleMediaItem[];
+  };
+}
+
 
 interface GroupMediaProps {
   session: string;
@@ -106,6 +114,27 @@ function formatDate(timestamp: number): string {
   });
 }
 
+function AlbumBadge({ count }: { count: number }) {
+  return (
+    <span className="absolute left-2 top-2 z-10 flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-medium text-white">
+      <svg
+        width="11"
+        height="11"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <rect x="2" y="6" width="14" height="14" rx="2" />
+        <path d="M6 6V4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-2" />
+      </svg>
+      {count}
+    </span>
+  );
+}
+
 export default function GroupMedia({
   session,
   groupId,
@@ -118,7 +147,22 @@ export default function GroupMedia({
   const [videoLayout, setVideoLayout] = useState<VideoLayout>("portrait");
   const [hasMore, setHasMore] = useState(false);
   const [nextOffsetId, setNextOffsetId] = useState(0);
-  const [viewer, setViewer] = useState<MediaItem | null>(null);
+  const [viewer, setViewer] = useState<SingleMediaItem | null>(null);
+  const [albumView, setAlbumView] = useState<MediaItem | null>(null);
+
+  function openItem(item: MediaItem) {
+    if (item.album) {
+      setAlbumView(item);
+      return;
+    }
+    const { album: _album, ...single } = item;
+    void _album;
+    setViewer(single);
+  }
+
+  function openAlbumItem(item: SingleMediaItem) {
+    setViewer(item);
+  }
 
   useEffect(() => {
     fetchMedia(0, true);
@@ -153,18 +197,46 @@ export default function GroupMedia({
     }
   }
 
-  const filtered =
-    tab === "all" ? media : media.filter((m) => m.type === tab);
+  // For specific tabs, flatten albums so individual items show through.
+  const filtered: MediaItem[] = (() => {
+    if (tab === "all") return media;
+    const out: MediaItem[] = [];
+    for (const item of media) {
+      if (item.album) {
+        for (const sub of item.album.items) {
+          if (sub.type === tab) out.push(sub);
+        }
+      } else if (item.type === tab) {
+        out.push(item);
+      }
+    }
+    return out;
+  })();
 
   const photos = filtered.filter((m) => m.type === "photo");
   const videos = filtered.filter((m) => m.type === "video");
   const files = filtered.filter((m) => m.type === "file");
 
+  function countByType(type: SingleMediaItem["type"]): number {
+    let n = 0;
+    for (const item of media) {
+      if (item.album) {
+        for (const sub of item.album.items) if (sub.type === type) n += 1;
+      } else if (item.type === type) {
+        n += 1;
+      }
+    }
+    return n;
+  }
+
   const counts = {
-    all: media.length,
-    photo: media.filter((m) => m.type === "photo").length,
-    video: media.filter((m) => m.type === "video").length,
-    file: media.filter((m) => m.type === "file").length,
+    all: media.reduce(
+      (n, m) => n + (m.album ? m.album.items.length : 1),
+      0
+    ),
+    photo: countByType("photo"),
+    video: countByType("video"),
+    file: countByType("file"),
   };
 
   const videoGridClass =
@@ -174,6 +246,98 @@ export default function GroupMedia({
   const videoCardClass =
     videoLayout === "portrait" ? "aspect-[9/16]" : "aspect-video";
 
+
+  if (albumView && albumView.album) {
+    const albumItems = albumView.album.items;
+    const photoCount = albumItems.filter((i) => i.type === "photo").length;
+    const videoCount = albumItems.filter((i) => i.type === "video").length;
+    const fileCount = albumItems.filter((i) => i.type === "file").length;
+    const summary = [
+      photoCount && `${photoCount} photo${photoCount > 1 ? "s" : ""}`,
+      videoCount && `${videoCount} video${videoCount > 1 ? "s" : ""}`,
+      fileCount && `${fileCount} file${fileCount > 1 ? "s" : ""}`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    return (
+      <div className="flex h-full flex-col">
+        <div className="flex items-center gap-3 border-b border-zinc-200 px-3 py-3 sm:px-6 dark:border-zinc-800">
+          <button
+            type="button"
+            onClick={() => setAlbumView(null)}
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-zinc-200 text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            aria-label="Back"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+          </button>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Album · {albumItems.length} items
+            </p>
+            <p className="truncate text-xs text-zinc-500">{summary}</p>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-3 sm:p-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            {albumItems.map((item, i) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => openAlbumItem(item)}
+                className="group relative aspect-square overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 transition-all hover:border-blue-300 hover:shadow-lg dark:border-zinc-800 dark:bg-zinc-800"
+              >
+                <Thumbnail
+                  session={session}
+                  groupId={groupId}
+                  messageId={item.id}
+                  alt={item.caption || item.fileName}
+                  className="h-full w-full transition-transform group-hover:scale-105"
+                />
+                {item.type === "video" && (
+                  <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-black/50 backdrop-blur-sm transition-transform group-hover:scale-110">
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
+                        <polygon points="6 4 20 12 6 20" />
+                      </svg>
+                    </div>
+                  </div>
+                )}
+                <span className="absolute left-2 top-2 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-medium text-white">
+                  {i + 1}
+                </span>
+                {item.type === "video" && item.duration > 0 && (
+                  <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                    {formatDuration(item.duration)}
+                  </span>
+                )}
+                {item.fileSize > 0 && (
+                  <span className="absolute bottom-2 left-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white/80">
+                    {formatFileSize(item.fileSize)}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {viewer && (
+          <MediaViewer
+            session={session}
+            groupId={groupId}
+            messageId={viewer.id}
+            type={viewer.type}
+            fileName={viewer.fileName}
+            caption={viewer.caption}
+            onClose={() => setViewer(null)}
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -266,7 +430,7 @@ export default function GroupMedia({
                   {photos.map((item) => (
                     <button
                       key={item.id}
-                      onClick={() => setViewer(item)}
+                      onClick={() => openItem(item)}
                       className="group relative aspect-square overflow-hidden rounded-xl border border-zinc-200 bg-zinc-100 transition-all hover:border-blue-300 hover:shadow-lg dark:border-zinc-800 dark:bg-zinc-800"
                     >
                       <Thumbnail
@@ -276,6 +440,9 @@ export default function GroupMedia({
                         alt={item.caption}
                         className="h-full w-full transition-transform group-hover:scale-105"
                       />
+                      {item.album && (
+                        <AlbumBadge count={item.album.items.length} />
+                      )}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
                       <div className="absolute bottom-2 left-2 right-2 truncate text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100">
                         {item.caption || formatDate(item.date)}
@@ -338,7 +505,7 @@ export default function GroupMedia({
                   {videos.map((item) => (
                     <button
                       key={item.id}
-                      onClick={() => setViewer(item)}
+                      onClick={() => openItem(item)}
                       className={`group relative ${videoCardClass} overflow-hidden rounded-xl border border-zinc-200 bg-zinc-900 transition-all hover:border-blue-300 hover:shadow-lg dark:border-zinc-800`}
                     >
                       <Thumbnail
@@ -366,10 +533,14 @@ export default function GroupMedia({
                           {formatDuration(item.duration)}
                         </span>
                       )}
-                      {item.fileSize > 0 && (
-                        <span className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white/70">
-                          {formatFileSize(item.fileSize)}
-                        </span>
+                      {item.album ? (
+                        <AlbumBadge count={item.album.items.length} />
+                      ) : (
+                        item.fileSize > 0 && (
+                          <span className="absolute left-2 top-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white/70">
+                            {formatFileSize(item.fileSize)}
+                          </span>
+                        )
                       )}
                       <a
                         href={buildDownloadUrl(session, groupId, item.id)}
@@ -415,7 +586,7 @@ export default function GroupMedia({
                   {files.map((item) => (
                     <button
                       key={item.id}
-                      onClick={() => setViewer(item)}
+                      onClick={() => openItem(item)}
                       className="flex w-full min-w-0 items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3 text-left transition-all hover:border-blue-200 hover:shadow-md sm:gap-4 sm:p-4 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-blue-800"
                     >
                       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500/10 to-orange-500/10 dark:from-amber-500/20 dark:to-orange-500/20">
@@ -425,8 +596,15 @@ export default function GroupMedia({
                         </svg>
                       </div>
                       <div className="min-w-0 flex-1 overflow-hidden">
-                        <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                          {item.fileName || "Unknown file"}
+                        <p className="flex items-center gap-2 truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+                          <span className="truncate">
+                            {item.fileName || "Unknown file"}
+                          </span>
+                          {item.album && (
+                            <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
+                              Album · {item.album.items.length}
+                            </span>
+                          )}
                         </p>
                         <p className="mt-0.5 truncate text-xs text-zinc-500">
                           {formatFileSize(item.fileSize)}

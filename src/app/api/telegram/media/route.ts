@@ -111,7 +111,7 @@ export async function POST(request: Request) {
     const client = createClient(sessionString);
     await client.connect();
 
-    let messages = await client.getMessages(groupId, { limit, offsetId });
+    const messages = await client.getMessages(groupId, { limit, offsetId });
 
     // If the last (oldest in this batch) message belongs to an album, keep
     // pulling until we exit that album so a single album never spans pages.

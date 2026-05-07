@@ -1,10 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import DownloadProgressAlert from "./DownloadProgressAlert";
 import MediaViewer from "./MediaViewer";
 import Thumbnail from "./Thumbnail";
-import { downloadTelegramMedia } from "@/lib/downloadTelegramMedia";
+
+function buildDownloadUrl(session: string, groupId: string, messageId: number) {
+  const params = new URLSearchParams({
+    sessionString: session,
+    groupId,
+    messageId: String(messageId),
+    download: "1",
+  });
+  return `/api/telegram/download?${params.toString()}`;
+}
 
 interface MediaItem {
   id: number;
@@ -113,11 +121,6 @@ export default function GroupMedia({
   const [hasMore, setHasMore] = useState(false);
   const [nextOffsetId, setNextOffsetId] = useState(0);
   const [viewer, setViewer] = useState<MediaItem | null>(null);
-  const [downloadState, setDownloadState] = useState<{
-    name: string;
-    progress: number | null;
-    error?: string;
-  } | null>(null);
 
   useEffect(() => {
     fetchMedia(0, true);
@@ -182,44 +185,6 @@ export default function GroupMedia({
   const videoCardClass =
     videoLayout === "portrait" ? "aspect-[9/16]" : "aspect-video";
 
-  async function handleDownload(item: MediaItem) {
-    setDownloadState({
-      name: item.fileName || `video_${item.id}.mp4`,
-      progress: 0,
-    });
-
-    try {
-      await downloadTelegramMedia({
-        session,
-        groupId,
-        messageId: item.id,
-        fileName: item.fileName || `video_${item.id}.mp4`,
-        onProgress: (progress) => {
-          setDownloadState((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  progress,
-                }
-              : prev
-          );
-        },
-      });
-
-      setTimeout(() => {
-        setDownloadState(null);
-      }, 900);
-    } catch {
-      setDownloadState((prev) =>
-        prev
-          ? {
-              ...prev,
-              error: "The file could not be downloaded.",
-            }
-          : null
-      );
-    }
-  }
 
   return (
     <div className="flex h-full flex-col">
@@ -420,12 +385,10 @@ export default function GroupMedia({
                           {formatFileSize(item.fileSize)}
                         </span>
                       )}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void handleDownload(item);
-                        }}
+                      <a
+                        href={buildDownloadUrl(session, groupId, item.id)}
+                        download={item.fileName || `video_${item.id}.mp4`}
+                        onClick={(e) => e.stopPropagation()}
                         className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity hover:bg-black/85 group-hover:opacity-100"
                         aria-label={`Download ${item.fileName || "video"}`}
                       >
@@ -443,7 +406,7 @@ export default function GroupMedia({
                           <polyline points="7 10 12 15 17 10" />
                           <line x1="12" y1="15" x2="12" y2="3" />
                         </svg>
-                      </button>
+                      </a>
                     </button>
                   ))}
                 </div>
@@ -570,13 +533,6 @@ export default function GroupMedia({
         />
       )}
 
-      {downloadState && (
-        <DownloadProgressAlert
-          title={downloadState.name}
-          progress={downloadState.progress}
-          error={downloadState.error}
-        />
-      )}
     </div>
   );
 }

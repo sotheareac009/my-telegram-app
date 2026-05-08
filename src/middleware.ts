@@ -2,22 +2,15 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export function middleware(request: NextRequest) {
-  // If no IPs are configured in .env, we allow all traffic to prevent locking out the user
-  const whitelistedIpsRaw = process.env.WHITELISTED_IPS;
-  if (!whitelistedIpsRaw) {
-    return NextResponse.next();
-  }
-
+  // If no IPs are configured, it will default to an empty list and block everyone 
+  // EXCEPT localhost.
+  const whitelistedIpsRaw = process.env.WHITELISTED_IPS || "";
+  
   // Parse the comma-separated list of IPs
   const whitelistedIps = whitelistedIpsRaw
     .split(',')
     .map((ip) => ip.trim())
     .filter(Boolean);
-
-  // If the variable is present but empty, we still allow to be safe (or you can choose to block)
-  if (whitelistedIps.length === 0) {
-    return NextResponse.next();
-  }
 
   // Always allow localhost during development to prevent locking yourself out
   whitelistedIps.push('127.0.0.1', '::1', 'localhost');

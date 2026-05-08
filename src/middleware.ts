@@ -2,8 +2,12 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export function middleware(request: NextRequest) {
-  // If no IPs are configured, it will default to an empty list and block everyone 
-  // EXCEPT localhost.
+  // Prevent infinite loop if already on the access-denied page
+  if (request.nextUrl.pathname === '/access-denied') {
+    return NextResponse.next();
+  }
+
+  // If no IPs are configured, it will default to an empty list and block everyone
   const whitelistedIpsRaw = process.env.WHITELISTED_IPS || "";
   
   // Parse the comma-separated list of IPs
@@ -28,20 +32,14 @@ export function middleware(request: NextRequest) {
   if (ip && !whitelistedIps.includes(ip)) {
     console.log(`[Middleware] Blocked request from unauthorized IP: ${ip}`);
     
-    // Return a 403 Forbidden response with a clean error message
-    return new NextResponse(
-      JSON.stringify({ 
-        error: "Access Denied", 
-        message: "Your IP address is not whitelisted.",
-        yourIp: ip 
-      }), 
-      {
-        status: 403,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      }
-    );
+    // Rewrite to the custom access denied page and pass the IP in headers
+    const url = request.nextUrl.clone();
+    url.pathname = '/access-denied';
+    
+    const response = NextResponse.rewrite(url);
+    response.headers.set('x-blocked-ip', ip || 'Unknown');
+    
+    return response;
   }
 
   return NextResponse.next();

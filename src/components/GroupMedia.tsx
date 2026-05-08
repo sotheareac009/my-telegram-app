@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import LinksModal, { type LinkEntry } from "./LinksModal";
 import MediaViewer from "./MediaViewer";
 import MessageSearch from "./MessageSearch";
@@ -394,12 +394,27 @@ export default function GroupMedia({
     setTimeout(() => setHighlightedMessageId(null), 3500);
   }
 
+  // ── Scroll restoration when navigating into/out of album view ──────────
+  /** Ref attached to the main scrollable content div */
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  /** Saves the Y offset before entering album view so we can restore it */
+  const savedScrollRef = useRef<number>(0);
+
+  // Restore scroll position after returning from album view
+  useEffect(() => {
+    if (!albumView && scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = savedScrollRef.current;
+    }
+  }, [albumView]);
+
   function openItem(item: MediaItem) {
     if (selectionMode) {
       toggleSelection(itemsForSelection(item));
       return;
     }
     if (item.album) {
+      // Save current scroll position before unmounting the grid
+      savedScrollRef.current = scrollContainerRef.current?.scrollTop ?? 0;
       setAlbumView(item);
       return;
     }
@@ -1005,7 +1020,7 @@ export default function GroupMedia({
       )}
 
       {/* Content */}
-      <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+      <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
         {loading ? (
           <div className="space-y-6">
             {/* Photo skeleton */}

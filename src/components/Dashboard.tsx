@@ -3,7 +3,11 @@
 import { useCallback, useState } from "react";
 import Header from "./Header";
 import Sidebar from "./Sidebar";
-import GroupsGrid, { type Group, type GroupInfo } from "./GroupsGrid";
+import GroupsGrid, {
+  type ChatFolder,
+  type Group,
+  type GroupInfo,
+} from "./GroupsGrid";
 import GroupMedia, { type MediaCacheEntry } from "./GroupMedia";
 import Breadcrumb, { type BreadcrumbItem } from "./Breadcrumb";
 
@@ -43,13 +47,22 @@ export default function Dashboard({
   const [collapsed, setCollapsed] = useState(false);
   const [activeMenu, setActiveMenu] = useState("home");
   const [selectedGroup, setSelectedGroup] = useState<GroupInfo | null>(null);
+  const [activeFolderByType, setActiveFolderByType] = useState<{
+    groups: string;
+    channels: string;
+  }>({ groups: "all", channels: "all" });
   const [groupsCache, setGroupsCache] = useState<Group[] | null>(null);
+  const [foldersCache, setFoldersCache] = useState<ChatFolder[] | null>(null);
   const [mediaCache, setMediaCache] = useState<Record<string, MediaCacheEntry>>(
     {}
   );
 
   const handleGroupsLoaded = useCallback((groups: Group[]) => {
     setGroupsCache(groups);
+  }, []);
+
+  const handleFoldersLoaded = useCallback((folders: ChatFolder[]) => {
+    setFoldersCache(folders);
   }, []);
 
   const handleMediaCacheUpdate = useCallback(
@@ -70,6 +83,15 @@ export default function Dashboard({
 
   function handleBackToList() {
     setSelectedGroup(null);
+  }
+
+  function handleSwitchAccount(accountId: string) {
+    setSelectedGroup(null);
+    setActiveFolderByType({ groups: "all", channels: "all" });
+    setGroupsCache(null);
+    setFoldersCache(null);
+    setMediaCache({});
+    onSwitchAccount(accountId);
   }
 
   // Build breadcrumb items
@@ -96,7 +118,7 @@ export default function Dashboard({
         session={session}
         accounts={accounts}
         currentAccountId={currentAccountId}
-        onSwitchAccount={onSwitchAccount}
+        onSwitchAccount={handleSwitchAccount}
         onAddAccount={onAddAccount}
         onSignOut={onSignOut}
       />
@@ -181,9 +203,23 @@ export default function Dashboard({
                 <GroupsGrid
                   session={session}
                   type={activeMenu === "channels" ? "channels" : "groups"}
+                  activeFolderId={
+                    activeMenu === "channels"
+                      ? activeFolderByType.channels
+                      : activeFolderByType.groups
+                  }
+                  onActiveFolderChange={(folderId) => {
+                    setActiveFolderByType((prev) =>
+                      activeMenu === "channels"
+                        ? { ...prev, channels: folderId }
+                        : { ...prev, groups: folderId }
+                    );
+                  }}
                   onGroupSelect={handleGroupSelect}
                   groups={groupsCache}
+                  folders={foldersCache}
                   onGroupsLoaded={handleGroupsLoaded}
+                  onFoldersLoaded={handleFoldersLoaded}
                 />
               )}
 

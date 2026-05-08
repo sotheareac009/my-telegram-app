@@ -11,6 +11,7 @@ export interface Group {
   isGroup: boolean;
   lastMessage: string;
   date: number;
+  folderIds: string[];
 }
 
 export interface GroupInfo {
@@ -18,12 +19,21 @@ export interface GroupInfo {
   title: string;
 }
 
+export interface ChatFolder {
+  id: string;
+  title: string;
+}
+
 interface GroupsGridProps {
   session: string;
   type: "groups" | "channels";
+  activeFolderId: string;
+  onActiveFolderChange: (folderId: string) => void;
   onGroupSelect: (group: GroupInfo) => void;
   groups: Group[] | null;
+  folders: ChatFolder[] | null;
   onGroupsLoaded: (groups: Group[]) => void;
+  onFoldersLoaded: (folders: ChatFolder[]) => void;
 }
 
 const GRADIENT_COLORS = [
@@ -58,18 +68,22 @@ function formatTime(timestamp: number): string {
 export default function GroupsGrid({
   session,
   type,
+  activeFolderId,
+  onActiveFolderChange,
   onGroupSelect,
   groups,
+  folders,
   onGroupsLoaded,
+  onFoldersLoaded,
 }: GroupsGridProps) {
-  const loading = groups === null;
+  const loading = groups === null || folders === null;
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const perPage = 20;
 
   useEffect(() => {
     if (!session) return;
-    if (groups !== null) return;
+    if (groups !== null && folders !== null) return;
 
     let cancelled = false;
 
@@ -83,10 +97,12 @@ export default function GroupsGrid({
         const data = await res.json();
         if (!cancelled) {
           onGroupsLoaded(data.groups ?? []);
+          onFoldersLoaded(data.folders ?? []);
         }
       } catch {
         if (!cancelled) {
           onGroupsLoaded([]);
+          onFoldersLoaded([]);
         }
       }
     }
@@ -96,10 +112,24 @@ export default function GroupsGrid({
     return () => {
       cancelled = true;
     };
-  }, [session, groups, onGroupsLoaded]);
+  }, [session, folders, groups, onFoldersLoaded, onGroupsLoaded]);
 
-  const filtered = (groups ?? [])
-    .filter((g) => (type === "channels" ? g.isChannel : g.isGroup))
+  const typedGroups = (groups ?? []).filter((g) =>
+    type === "channels" ? g.isChannel && !g.isGroup : g.isGroup
+  );
+  const visibleFolders = (folders ?? []).filter((folder) =>
+    typedGroups.some((group) => group.folderIds.includes(folder.id))
+  );
+  const selectedFolderId =
+    activeFolderId === "all" ||
+    visibleFolders.some((folder) => folder.id === activeFolderId)
+      ? activeFolderId
+      : "all";
+  const folderFiltered =
+    selectedFolderId === "all"
+      ? typedGroups
+      : typedGroups.filter((group) => group.folderIds.includes(selectedFolderId));
+  const filtered = folderFiltered
     .filter((g) => g.title.toLowerCase().includes(search.toLowerCase()));
 
   const totalPages = Math.ceil(filtered.length / perPage);
@@ -152,6 +182,44 @@ export default function GroupsGrid({
           />
         </div>
       </div>
+
+      {visibleFolders.length > 0 && (
+        <div className="mb-4 flex gap-2 overflow-x-auto pb-1">
+          {[{ id: "all", title: "All" }, ...visibleFolders].map((folder) => {
+            const isActive = selectedFolderId === folder.id;
+            const count =
+              folder.id === "all"
+                ? typedGroups.length
+                : typedGroups.filter((group) =>
+                    group.folderIds.includes(folder.id)
+                  ).length;
+            return (
+              <button
+                key={folder.id}
+                type="button"
+                onClick={() => {
+                  onActiveFolderChange(folder.id);
+                  setPage(1);
+                }}
+                className={`flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
+                  isActive
+                    ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300"
+                    : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                }`}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 7h6l2 2h10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" />
+                  <path d="M3 7V5a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2" />
+                </svg>
+                <span className="max-w-32 truncate">{folder.title}</span>
+                <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800">
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Grid */}
       <div className="min-h-0 flex-1 overflow-y-auto">

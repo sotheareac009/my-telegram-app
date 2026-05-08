@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import LinksModal, { type LinkEntry } from "./LinksModal";
 import MediaViewer from "./MediaViewer";
+import MessageSearch from "./MessageSearch";
 import Thumbnail from "./Thumbnail";
 
 function buildDownloadUrl(session: string, groupId: string, messageId: number) {
@@ -329,6 +330,32 @@ function readStoredLayout(key: string, fallback: VideoLayout): VideoLayout {
   return isVideoLayout(value) ? value : fallback;
 }
 
+/**
+ * Overlay rendered on top of a photo or video card when it is the active
+ * search-jump target. Shows a pulsing blue border glow + a "Search Result" pill.
+ */
+function SearchResultBadge() {
+  return (
+    <>
+      {/* Pulsing blue vignette overlay */}
+      <div
+        className="pointer-events-none absolute inset-0 z-20 animate-pulse rounded-xl"
+        style={{
+          boxShadow: "inset 0 0 0 3px rgba(59,130,246,0.9), inset 0 0 20px rgba(59,130,246,0.35)",
+        }}
+      />
+      {/* Pill badge */}
+      <span className="absolute bottom-2 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-full bg-blue-600 px-2.5 py-1 text-[10px] font-semibold text-white shadow-lg shadow-blue-600/50 backdrop-blur-sm">
+        <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        Search result
+      </span>
+    </>
+  );
+}
+
 export default function GroupMedia({
   session,
   groupId,
@@ -353,6 +380,19 @@ export default function GroupMedia({
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [linksModalOpen, setLinksModalOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  // React-managed highlight (replaces DOM class mutation)
+  const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null);
+  // ID to jump to after a media reload triggered by search
+  const [jumpTargetId, setJumpTargetId] = useState<number | null>(null);
+  // True when the grid was reloaded from a search-jump offset (not from latest)
+  const [isSearchJumpView, setIsSearchJumpView] = useState(false);
+
+  /** Set a highlight that auto-clears after 3.5 s */
+  function highlightMessage(id: number) {
+    setHighlightedMessageId(id);
+    setTimeout(() => setHighlightedMessageId(null), 3500);
+  }
 
   function openItem(item: MediaItem) {
     if (selectionMode) {
@@ -381,6 +421,7 @@ export default function GroupMedia({
       setLoading(false);
       return;
     }
+    setIsSearchJumpView(false);
     fetchMedia(0, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, groupId]);
@@ -392,6 +433,33 @@ export default function GroupMedia({
   useEffect(() => {
     window.localStorage.setItem(ALBUM_LAYOUT_STORAGE_KEY, albumLayout);
   }, [albumLayout]);
+
+  // After a jump-triggered reload, wait for the target item to appear then scroll to it
+  useEffect(() => {
+    if (jumpTargetId === null || loading) return;
+    const id = jumpTargetId;
+
+    let attempts = 0;
+    const MAX_ATTEMPTS = 30; // up to ~3s of polling
+    const interval = setInterval(() => {
+      const el = document.getElementById(`media-item-${id}`);
+      if (el) {
+        clearInterval(interval);
+        setJumpTargetId(null);
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        highlightMessage(id);
+      } else {
+        attempts++;
+        if (attempts >= MAX_ATTEMPTS) {
+          clearInterval(interval);
+          setJumpTargetId(null);
+        }
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpTargetId, loading]);
 
   async function fetchMedia(offsetId: number, reset: boolean) {
     if (reset) setLoading(true);
@@ -866,21 +934,75 @@ export default function GroupMedia({
             </span>
           </button>
         ))}
-        <button
-          type="button"
-          onClick={() => {
-            setSelectionMode((value) => !value);
-          }}
-          className={`ml-auto shrink-0 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-            selectionMode
-              ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300"
-              : "border-zinc-200 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          }`}
-        >
-          Select
-        </button>
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          {/* Search button */}
+          <button
+            type="button"
+            id="group-search-btn"
+            onClick={() => setSearchOpen(true)}
+            title="Search messages"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+          </button>
+          {/* Select button */}
+          <button
+            type="button"
+            onClick={() => {
+              setSelectionMode((value) => !value);
+            }}
+            className={`shrink-0 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+              selectionMode
+                ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300"
+                : "border-zinc-200 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            }`}
+          >
+            Select
+          </button>
+        </div>
       </div>
       {selectionToolbar}
+
+      {/* Search-jump view banner — shown when grid is reloaded from a search offset */}
+      {isSearchJumpView && !selectionMode && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-blue-200/70 bg-blue-50/80 px-4 py-2 dark:border-blue-900/50 dark:bg-blue-950/30">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-blue-500">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <p className="min-w-0 flex-1 truncate text-xs text-blue-700 dark:text-blue-300">
+            Showing results near searched message
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setIsSearchJumpView(false);
+              void fetchMedia(0, true);
+            }}
+            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-2.5 py-1 text-[11px] font-semibold text-white transition-colors hover:bg-blue-700 active:scale-95"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="17 11 12 6 7 11" />
+              <polyline points="17 18 12 13 7 18" />
+            </svg>
+            Back to latest
+          </button>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            onClick={() => setIsSearchJumpView(false)}
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-blue-400 transition-colors hover:bg-blue-100 hover:text-blue-600 dark:hover:bg-blue-900/50"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* Content */}
       <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
@@ -944,15 +1066,19 @@ export default function GroupMedia({
                   {photos.map((item) => {
                     const selectable = itemsForSelection(item);
                     const selected = isSelected(selectable);
+                    const isHighlighted = highlightedMessageId === item.id;
                     return (
                       <button
                         key={item.id}
+                        id={`media-item-${item.id}`}
                         onClick={() => openItem(item)}
                         aria-pressed={selectionMode ? selected : undefined}
                         className={`group relative aspect-square cursor-pointer rounded-xl border bg-zinc-100 transition-all hover:border-blue-300 hover:shadow-lg dark:bg-zinc-800 ${
                           item.album ? "overflow-visible" : "overflow-hidden"
                         } ${
-                          selected
+                          isHighlighted
+                            ? "border-blue-500 shadow-lg shadow-blue-500/30 ring-2 ring-blue-500 ring-offset-1"
+                            : selected
                             ? "border-blue-500 ring-2 ring-blue-500/50"
                             : "border-zinc-200 dark:border-zinc-800"
                         }`}
@@ -978,6 +1104,7 @@ export default function GroupMedia({
                           <div className="absolute bottom-2 left-2 right-2 truncate text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100">
                             {item.caption || formatDate(item.date)}
                           </div>
+                          {isHighlighted && <SearchResultBadge />}
                         </div>
                       </button>
                     );
@@ -1011,15 +1138,19 @@ export default function GroupMedia({
                   {videos.map((item) => {
                     const selectable = itemsForSelection(item);
                     const selected = isSelected(selectable);
+                    const isHighlighted = highlightedMessageId === item.id;
                     return (
                       <button
                         key={item.id}
+                        id={`media-item-${item.id}`}
                         onClick={() => openItem(item)}
                         aria-pressed={selectionMode ? selected : undefined}
                         className={`group relative ${videoCardClass} cursor-pointer rounded-xl border bg-zinc-900 transition-all hover:border-blue-300 hover:shadow-lg ${
                           item.album ? "overflow-visible" : "overflow-hidden"
                         } ${
-                          selected
+                          isHighlighted
+                            ? "border-blue-500 shadow-lg shadow-blue-500/30 ring-2 ring-blue-500 ring-offset-1"
+                            : selected
                             ? "border-blue-500 ring-2 ring-blue-500/50"
                             : "border-zinc-200 dark:border-zinc-800"
                         }`}
@@ -1077,6 +1208,7 @@ export default function GroupMedia({
                               <DownloadIcon />
                             </a>
                           )}
+                          {isHighlighted && <SearchResultBadge />}
                         </div>
                       </button>
                     );
@@ -1101,13 +1233,17 @@ export default function GroupMedia({
                   {files.map((item) => {
                     const selectable = itemsForSelection(item);
                     const selected = isSelected(selectable);
+                    const isHighlighted = highlightedMessageId === item.id;
                     return (
                       <button
                         key={item.id}
+                        id={`media-item-${item.id}`}
                         onClick={() => openItem(item)}
                         aria-pressed={selectionMode ? selected : undefined}
                         className={`relative flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-xl border bg-white p-3 text-left transition-all hover:border-blue-200 hover:shadow-md sm:gap-4 sm:p-4 dark:bg-zinc-900 dark:hover:border-blue-800 ${
-                          selected
+                          isHighlighted
+                            ? "border-blue-500 bg-blue-50/60 shadow-md shadow-blue-500/20 ring-2 ring-blue-500 ring-offset-1 dark:bg-blue-950/20"
+                            : selected
                             ? "border-blue-500 ring-2 ring-blue-500/40"
                             : "border-zinc-200 dark:border-zinc-800"
                         }`}
@@ -1138,6 +1274,15 @@ export default function GroupMedia({
                         <span className="hidden shrink-0 text-xs text-zinc-400 sm:block">
                           {formatDate(item.date)}
                         </span>
+                        {isHighlighted && (
+                          <span className="absolute right-3 top-3 flex items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white shadow-sm">
+                            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                              <circle cx="11" cy="11" r="8" />
+                              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                            </svg>
+                            Search result
+                          </span>
+                        )}
                       </button>
                     );
                   })}
@@ -1186,6 +1331,39 @@ export default function GroupMedia({
         <LinksModal
           entries={buildLinkEntries()}
           onClose={() => setLinksModalOpen(false)}
+        />
+      )}
+
+      {/* Message search panel */}
+      {searchOpen && (
+        <MessageSearch
+          session={session}
+          groupId={groupId}
+          groupTitle={groupTitle}
+          onClose={() => setSearchOpen(false)}
+          onJumpToMessage={(messageId) => {
+            setSearchOpen(false);
+
+            const tryScrollNow = () => {
+              const el = document.getElementById(`media-item-${messageId}`);
+              if (el) {
+                el.scrollIntoView({ behavior: "smooth", block: "center" });
+                highlightMessage(messageId);
+                return true;
+              }
+              return false;
+            };
+
+            // Give the panel close animation time, then check DOM
+            setTimeout(() => {
+              if (!tryScrollNow()) {
+                // Not loaded yet — reload grid from this message's position
+                setJumpTargetId(messageId);
+                setIsSearchJumpView(true);
+                void fetchMedia(messageId + 1, true);
+              }
+            }, 280);
+          }}
         />
       )}
     </div>

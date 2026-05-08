@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+const PAGE_SIZE = 20;
 
 interface AccessCode {
   id: string;
@@ -27,18 +29,64 @@ export default function AdminDashboard() {
   const [generating, setGenerating] = useState(false);
   const [formError, setFormError] = useState("");
 
+  const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [listLoading, setListLoading] = useState(false);
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  async function fetchCodes(q: string, p: number) {
+    setListLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page: String(p),
+        pageSize: String(PAGE_SIZE),
+      });
+      if (q.trim()) params.set("q", q.trim());
+
+      const res = await fetch(`/api/admin/codes?${params.toString()}`, {
+        headers: { "x-admin-password": password },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        setCodes(json.data);
+        setTotal(json.total);
+      }
+    } finally {
+      setListLoading(false);
+    }
+  }
+
+  // Reset to page 1 whenever search query changes (page change re-fetches via the effect below)
+  function onSearchChange(value: string) {
+    setSearchQuery(value);
+    setPage(1);
+  }
+
+  // Debounced fetch on search/page change once authenticated
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const t = setTimeout(() => {
+      fetchCodes(searchQuery, page);
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, page, isAuthenticated]);
+
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError("");
 
     try {
-      const res = await fetch("/api/admin/codes", {
+      const res = await fetch(`/api/admin/codes?page=1&pageSize=${PAGE_SIZE}`, {
         headers: { "x-admin-password": password },
       });
       if (res.ok) {
-        const data = await res.json();
-        setCodes(data);
+        const json = await res.json();
+        setCodes(json.data);
+        setTotal(json.total);
         setIsAuthenticated(true);
       } else {
         setError("Invalid admin password");
@@ -95,12 +143,19 @@ export default function AdminDashboard() {
       });
       if (res.ok) {
         const updated = await res.json();
+        setShowGenerateModal(false);
         if (isEdit) {
+          // Same page — local update is fine and avoids a refetch flicker.
           setCodes(codes.map(c => c.id === updated.id ? updated : c));
         } else {
-          setCodes([updated, ...codes]);
+          // New code: jump back to page 1 and clear any active search so it's visible.
+          setSearchQuery("");
+          if (page !== 1) {
+            setPage(1); // triggers refetch via effect
+          } else {
+            fetchCodes("", 1);
+          }
         }
-        setShowGenerateModal(false);
       } else {
         const data = await res.json().catch(() => ({}));
         setFormError(data.error || (isEdit ? "Failed to update code" : "Failed to generate code"));
@@ -234,6 +289,48 @@ export default function AdminDashboard() {
           </button>
         </div>
 
+        <div className="mb-4 flex items-center gap-3">
+          <div className="relative flex-1">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder="Search by code, name, or phone…"
+              className="w-full rounded-xl border border-zinc-200 bg-white py-2.5 pl-9 pr-9 text-sm text-zinc-900 placeholder:text-zinc-400 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-800 dark:bg-zinc-900 dark:text-white"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => onSearchChange("")}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            )}
+          </div>
+          <span className="text-xs text-zinc-500 whitespace-nowrap">
+            {listLoading ? "Loading…" : `${total} ${total === 1 ? "result" : "results"}`}
+          </span>
+        </div>
+
         <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-zinc-200 bg-zinc-50 text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950">
@@ -249,7 +346,13 @@ export default function AdminDashboard() {
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
               {codes.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-zinc-500">No access codes found.</td>
+                  <td colSpan={6} className="px-6 py-8 text-center text-zinc-500">
+                    {listLoading
+                      ? "Loading…"
+                      : searchQuery
+                        ? `No results for "${searchQuery}".`
+                        : "No access codes found."}
+                  </td>
                 </tr>
               ) : codes.map((code) => {
                 const fullName = [code.first_name, code.last_name].filter(Boolean).join(" ");
@@ -296,6 +399,48 @@ export default function AdminDashboard() {
             </tbody>
           </table>
         </div>
+
+        {total > 0 && (
+          <div className="mt-4 flex items-center justify-between text-sm">
+            <p className="text-zinc-500">
+              Showing{" "}
+              <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                {(page - 1) * PAGE_SIZE + 1}
+              </span>
+              {"–"}
+              <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                {Math.min(page * PAGE_SIZE, total)}
+              </span>{" "}
+              of{" "}
+              <span className="font-medium text-zinc-700 dark:text-zinc-300">{total}</span>
+            </p>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1 || listLoading}
+                className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="15 18 9 12 15 6" />
+                </svg>
+                Previous
+              </button>
+              <span className="px-3 text-zinc-500">
+                Page {page} of {totalPages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages || listLoading}
+                className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                Next
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {showGenerateModal && (

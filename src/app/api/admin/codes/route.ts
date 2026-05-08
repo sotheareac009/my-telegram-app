@@ -12,22 +12,48 @@ function checkAdminAuth(request: Request) {
   return true;
 }
 
-// GET all codes
+// GET codes (paginated, with optional search across code/first_name/last_name/phone_number)
 export async function GET(request: Request) {
   if (!checkAdminAuth(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { data, error } = await supabase
+  const { searchParams } = new URL(request.url);
+
+  // Strip PostgREST `or()` separators so user input can't break the filter syntax.
+  const q = (searchParams.get('q') ?? '').trim().replace(/[,()*]/g, '');
+
+  const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10) || 1);
+  const pageSize = Math.min(100, Math.max(1, parseInt(searchParams.get('pageSize') ?? '20', 10) || 20));
+
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  let query = supabase
     .from('access_codes')
-    .select('*')
-    .order('created_at', { ascending: false });
+    .select('*', { count: 'exact' })
+    .order('created_at', { ascending: false })
+    .range(from, to);
+
+  if (q) {
+    const escaped = q.replace(/%/g, '\\%').replace(/_/g, '\\_');
+    query = query.or(
+      `code.ilike.%${escaped}%,first_name.ilike.%${escaped}%,last_name.ilike.%${escaped}%,phone_number.ilike.%${escaped}%`
+    );
+  }
+
+  const { data, error, count } = await query;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json(data);
+  return NextResponse.json({
+    data: data ?? [],
+    total: count ?? 0,
+    page,
+    pageSize,
+  });
 }
 
 // POST a new random code

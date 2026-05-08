@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import Header from "./Header";
 import Sidebar from "./Sidebar";
-import GroupsGrid, { type GroupInfo } from "./GroupsGrid";
-import GroupMedia from "./GroupMedia";
+import GroupsGrid, { type Group, type GroupInfo } from "./GroupsGrid";
+import GroupMedia, { type MediaCacheEntry } from "./GroupMedia";
 import Breadcrumb, { type BreadcrumbItem } from "./Breadcrumb";
 
 interface UserInfo {
@@ -43,6 +43,21 @@ export default function Dashboard({
   const [collapsed, setCollapsed] = useState(false);
   const [activeMenu, setActiveMenu] = useState("home");
   const [selectedGroup, setSelectedGroup] = useState<GroupInfo | null>(null);
+  const [groupsCache, setGroupsCache] = useState<Group[] | null>(null);
+  const [mediaCache, setMediaCache] = useState<Record<string, MediaCacheEntry>>(
+    {}
+  );
+
+  const handleGroupsLoaded = useCallback((groups: Group[]) => {
+    setGroupsCache(groups);
+  }, []);
+
+  const handleMediaCacheUpdate = useCallback(
+    (groupId: string, entry: MediaCacheEntry) => {
+      setMediaCache((prev) => ({ ...prev, [groupId]: entry }));
+    },
+    []
+  );
 
   function handleMenuChange(menu: string) {
     setActiveMenu(menu);
@@ -167,6 +182,8 @@ export default function Dashboard({
                   session={session}
                   type={activeMenu === "channels" ? "channels" : "groups"}
                   onGroupSelect={handleGroupSelect}
+                  groups={groupsCache}
+                  onGroupsLoaded={handleGroupsLoaded}
                 />
               )}
 
@@ -176,6 +193,8 @@ export default function Dashboard({
                   session={session}
                   groupId={selectedGroup.id}
                   groupTitle={selectedGroup.title}
+                  cache={mediaCache[selectedGroup.id]}
+                  onCacheUpdate={handleMediaCacheUpdate}
                 />
               )}
           </div>

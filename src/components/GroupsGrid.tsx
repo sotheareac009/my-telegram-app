@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import DialogAvatar from "./DialogAvatar";
 
-interface Group {
+export interface Group {
   id: string;
   title: string;
   unreadCount: number;
@@ -22,6 +22,8 @@ interface GroupsGridProps {
   session: string;
   type: "groups" | "channels";
   onGroupSelect: (group: GroupInfo) => void;
+  groups: Group[] | null;
+  onGroupsLoaded: (groups: Group[]) => void;
 }
 
 const GRADIENT_COLORS = [
@@ -53,15 +55,21 @@ function formatTime(timestamp: number): string {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-export default function GroupsGrid({ session, type, onGroupSelect }: GroupsGridProps) {
-  const [groups, setGroups] = useState<Group[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function GroupsGrid({
+  session,
+  type,
+  onGroupSelect,
+  groups,
+  onGroupsLoaded,
+}: GroupsGridProps) {
+  const loading = groups === null;
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const perPage = 20;
 
   useEffect(() => {
     if (!session) return;
+    if (groups !== null) return;
 
     let cancelled = false;
 
@@ -73,14 +81,12 @@ export default function GroupsGrid({ session, type, onGroupSelect }: GroupsGridP
           body: JSON.stringify({ sessionString: session }),
         });
         const data = await res.json();
-        if (!cancelled && data.groups) {
-          setGroups(data.groups);
+        if (!cancelled) {
+          onGroupsLoaded(data.groups ?? []);
         }
       } catch {
-        // silently fail
-      } finally {
         if (!cancelled) {
-          setLoading(false);
+          onGroupsLoaded([]);
         }
       }
     }
@@ -90,9 +96,9 @@ export default function GroupsGrid({ session, type, onGroupSelect }: GroupsGridP
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, groups, onGroupsLoaded]);
 
-  const filtered = groups
+  const filtered = (groups ?? [])
     .filter((g) => (type === "channels" ? g.isChannel : g.isGroup))
     .filter((g) => g.title.toLowerCase().includes(search.toLowerCase()));
 

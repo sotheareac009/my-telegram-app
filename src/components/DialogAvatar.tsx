@@ -9,53 +9,89 @@ interface DialogAvatarProps {
   fallbackClassName: string;
 }
 
+type AvatarCacheValue = string | "failed";
+const avatarCache = new Map<string, AvatarCacheValue>();
+const inflightAvatars = new Map<string, Promise<AvatarCacheValue>>();
+
+function avatarKey(session: string, groupId: string) {
+  return `${session}::${groupId}`;
+}
+
+function loadAvatar(
+  session: string,
+  groupId: string
+): Promise<AvatarCacheValue> {
+  const key = avatarKey(session, groupId);
+  const cached = avatarCache.get(key);
+  if (cached !== undefined) return Promise.resolve(cached);
+
+  const inflight = inflightAvatars.get(key);
+  if (inflight) return inflight;
+
+  const promise = (async (): Promise<AvatarCacheValue> => {
+    try {
+      const res = await fetch("/api/telegram/dialog-photo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionString: session, groupId }),
+      });
+      if (!res.ok) {
+        avatarCache.set(key, "failed");
+        return "failed";
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      avatarCache.set(key, url);
+      return url;
+    } catch {
+      avatarCache.set(key, "failed");
+      return "failed";
+    } finally {
+      inflightAvatars.delete(key);
+    }
+  })();
+
+  inflightAvatars.set(key, promise);
+  return promise;
+}
+
 export default function DialogAvatar({
   session,
   groupId,
   title,
   fallbackClassName,
 }: DialogAvatarProps) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const initial = avatarCache.get(avatarKey(session, groupId));
+  const [url, setUrl] = useState<string | null>(
+    typeof initial === "string" ? initial : null
+  );
+  const [failed, setFailed] = useState(initial === "failed");
+  const [loaded, setLoaded] = useState(typeof initial === "string");
 
   useEffect(() => {
     let cancelled = false;
-    let objectUrl: string | null = null;
-
-    async function load() {
-      try {
-        const res = await fetch("/api/telegram/dialog-photo", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionString: session,
-            groupId,
-          }),
-        });
-
-        if (!res.ok) {
-          if (!cancelled) setFailed(true);
-          return;
-        }
-
-        const blob = await res.blob();
-        if (!cancelled) {
-          objectUrl = URL.createObjectURL(blob);
-          setUrl(objectUrl);
-        }
-      } catch {
-        if (!cancelled) setFailed(true);
+    const cached = avatarCache.get(avatarKey(session, groupId));
+    if (cached !== undefined) {
+      if (cached === "failed") {
+        setFailed(true);
+        setUrl(null);
+        setLoaded(false);
+      } else {
+        setFailed(false);
+        setUrl(cached);
+        setLoaded(true);
       }
+      return;
     }
 
-    load();
+    void loadAvatar(session, groupId).then((result) => {
+      if (cancelled) return;
+      if (result === "failed") setFailed(true);
+      else setUrl(result);
+    });
 
     return () => {
       cancelled = true;
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
     };
   }, [groupId, session]);
 

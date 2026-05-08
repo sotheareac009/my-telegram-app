@@ -11,6 +11,57 @@ interface ThumbnailProps {
   fallbackSrc?: string;
 }
 
+type ThumbCacheValue = string | "failed";
+const thumbCache = new Map<string, ThumbCacheValue>();
+const inflightThumbs = new Map<string, Promise<ThumbCacheValue>>();
+
+function thumbKey(session: string, groupId: string, messageId: number) {
+  return `${session}::${groupId}::${messageId}`;
+}
+
+function loadThumb(
+  session: string,
+  groupId: string,
+  messageId: number
+): Promise<ThumbCacheValue> {
+  const key = thumbKey(session, groupId, messageId);
+  const cached = thumbCache.get(key);
+  if (cached !== undefined) return Promise.resolve(cached);
+
+  const inflight = inflightThumbs.get(key);
+  if (inflight) return inflight;
+
+  const promise = (async (): Promise<ThumbCacheValue> => {
+    try {
+      const res = await fetch("/api/telegram/thumb", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionString: session,
+          groupId,
+          messageId,
+        }),
+      });
+      if (!res.ok) {
+        thumbCache.set(key, "failed");
+        return "failed";
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      thumbCache.set(key, url);
+      return url;
+    } catch {
+      thumbCache.set(key, "failed");
+      return "failed";
+    } finally {
+      inflightThumbs.delete(key);
+    }
+  })();
+
+  inflightThumbs.set(key, promise);
+  return promise;
+}
+
 export default function Thumbnail({
   session,
   groupId,
@@ -19,55 +70,44 @@ export default function Thumbnail({
   className = "",
   fallbackSrc = "",
 }: ThumbnailProps) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">(
-    "loading"
+  const initial = thumbCache.get(thumbKey(session, groupId, messageId));
+  const [url, setUrl] = useState<string | null>(
+    typeof initial === "string" ? initial : null
   );
-  const [imageLoaded, setImageLoaded] = useState(false);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">(() => {
+    if (typeof initial === "string") return "ready";
+    if (initial === "failed" && !fallbackSrc) return "error";
+    return "loading";
+  });
+  const [imageLoaded, setImageLoaded] = useState(typeof initial === "string");
 
   useEffect(() => {
     let cancelled = false;
-    let objectUrl: string | null = null;
-
-    async function load() {
-      try {
-        const res = await fetch("/api/telegram/thumb", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionString: session,
-            groupId,
-            messageId,
-          }),
-        });
-        if (!res.ok) {
-          if (!cancelled) {
-            if (!fallbackSrc) {
-              setStatus("error");
-            }
-          }
-          return;
-        }
-        const blob = await res.blob();
-        if (!cancelled) {
-          objectUrl = URL.createObjectURL(blob);
-          setUrl(objectUrl);
-        }
-      } catch {
-        if (!cancelled) {
-          if (!fallbackSrc) {
-            setStatus("error");
-          }
-        }
+    const cached = thumbCache.get(thumbKey(session, groupId, messageId));
+    if (cached !== undefined) {
+      if (cached === "failed") {
+        setUrl(null);
+        if (!fallbackSrc) setStatus("error");
+        setImageLoaded(false);
+      } else {
+        setUrl(cached);
+        setStatus("ready");
+        setImageLoaded(true);
       }
+      return;
     }
 
-    load();
+    void loadThumb(session, groupId, messageId).then((result) => {
+      if (cancelled) return;
+      if (result === "failed") {
+        if (!fallbackSrc) setStatus("error");
+      } else {
+        setUrl(result);
+      }
+    });
+
     return () => {
       cancelled = true;
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
     };
   }, [fallbackSrc, session, groupId, messageId]);
 

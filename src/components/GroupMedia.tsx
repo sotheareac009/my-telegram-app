@@ -14,7 +14,7 @@ function buildDownloadUrl(session: string, groupId: string, messageId: number) {
   return `/api/telegram/download?${params.toString()}`;
 }
 
-interface SingleMediaItem {
+export interface SingleMediaItem {
   id: number;
   type: "photo" | "video" | "file";
   date: number;
@@ -26,18 +26,25 @@ interface SingleMediaItem {
   duration: number;
 }
 
-interface MediaItem extends SingleMediaItem {
+export interface MediaItem extends SingleMediaItem {
   album?: {
     groupedId: string;
     items: SingleMediaItem[];
   };
 }
 
+export interface MediaCacheEntry {
+  media: MediaItem[];
+  hasMore: boolean;
+  nextOffsetId: number;
+}
 
 interface GroupMediaProps {
   session: string;
   groupId: string;
   groupTitle: string;
+  cache: MediaCacheEntry | undefined;
+  onCacheUpdate: (groupId: string, entry: MediaCacheEntry) => void;
 }
 
 type TabId = "all" | "photo" | "video" | "file";
@@ -325,9 +332,13 @@ export default function GroupMedia({
   session,
   groupId,
   groupTitle,
+  cache,
+  onCacheUpdate,
 }: GroupMediaProps) {
-  const [media, setMedia] = useState<MediaItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const media = cache?.media ?? [];
+  const hasMore = cache?.hasMore ?? false;
+  const nextOffsetId = cache?.nextOffsetId ?? 0;
+  const [loading, setLoading] = useState(cache === undefined);
   const [loadingMore, setLoadingMore] = useState(false);
   const [tab, setTab] = useState<TabId>("all");
   const [videoLayout, setVideoLayout] = useState<VideoLayout>(() =>
@@ -336,8 +347,6 @@ export default function GroupMedia({
   const [albumLayout, setAlbumLayout] = useState<VideoLayout>(() =>
     readStoredLayout(ALBUM_LAYOUT_STORAGE_KEY, "portrait")
   );
-  const [hasMore, setHasMore] = useState(false);
-  const [nextOffsetId, setNextOffsetId] = useState(0);
   const [viewer, setViewer] = useState<SingleMediaItem | null>(null);
   const [albumView, setAlbumView] = useState<MediaItem | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -367,7 +376,12 @@ export default function GroupMedia({
   }
 
   useEffect(() => {
+    if (cache !== undefined) {
+      setLoading(false);
+      return;
+    }
     fetchMedia(0, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, groupId]);
 
   useEffect(() => {
@@ -395,9 +409,12 @@ export default function GroupMedia({
       });
       const data = await res.json();
       if (data.media) {
-        setMedia((prev) => (reset ? data.media : [...prev, ...data.media]));
-        setHasMore(data.hasMore);
-        setNextOffsetId(data.nextOffsetId);
+        const prevMedia = reset ? [] : media;
+        onCacheUpdate(groupId, {
+          media: [...prevMedia, ...data.media],
+          hasMore: data.hasMore,
+          nextOffsetId: data.nextOffsetId,
+        });
       }
     } catch {
       // silently fail
@@ -526,7 +543,11 @@ export default function GroupMedia({
         ];
       });
 
-    setMedia((prev) => prune(prev));
+    onCacheUpdate(groupId, {
+      media: prune(media),
+      hasMore,
+      nextOffsetId,
+    });
     setAlbumView((prev) => {
       if (!prev?.album) return prev;
       const remaining = prev.album.items.filter((item) => !shouldRemove(item));

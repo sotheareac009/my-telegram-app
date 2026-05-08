@@ -27,8 +27,8 @@ export default function AuthPage() {
       });
 
       if (res.ok) {
-        // Success, reload to get past the middleware
-        window.location.href = "/";
+        // Success, send the user into the app
+        window.location.href = "/app";
       } else {
         const data = await res.json();
         setError(data.error || "Invalid access code");

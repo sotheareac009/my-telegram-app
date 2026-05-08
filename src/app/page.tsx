@@ -25,27 +25,57 @@ export default function LandingPage() {
       {/* Nav */}
       <header className="sticky top-0 z-20 border-b border-zinc-200/60 bg-white/80 shadow-sm shadow-zinc-900/5 backdrop-blur-md">
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-4 sm:px-10">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-cyan-400 shadow-lg shadow-blue-500/30">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21.198 2.433a2.242 2.242 0 0 0-1.022.215l-16.5 7.5a2.25 2.25 0 0 0 .126 4.303l4.698 1.174v4.875a2.25 2.25 0 0 0 3.96 1.473l2.073-2.395 4.199 3.148A2.25 2.25 0 0 0 22.2 21.1l1.5-16.5A2.25 2.25 0 0 0 21.198 2.433z" />
-            </svg>
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-cyan-400 shadow-lg shadow-blue-500/30">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="white"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M21.198 2.433a2.242 2.242 0 0 0-1.022.215l-16.5 7.5a2.25 2.25 0 0 0 .126 4.303l4.698 1.174v4.875a2.25 2.25 0 0 0 3.96 1.473l2.073-2.395 4.199 3.148A2.25 2.25 0 0 0 22.2 21.1l1.5-16.5A2.25 2.25 0 0 0 21.198 2.433z" />
+              </svg>
+            </div>
+            <span className="text-base font-semibold tracking-tight">
+              Tigram
+            </span>
           </div>
-          <span className="text-base font-semibold tracking-tight">Tigram</span>
-        </div>
-        <nav className="hidden items-center gap-8 text-sm text-zinc-600 md:flex">
-          <a href="#features" className="transition-colors hover:text-zinc-900">Features</a>
-          <a href="#how" className="transition-colors hover:text-zinc-900">How it works</a>
-          <a href="#security" className="transition-colors hover:text-zinc-900">Security</a>
-          <a href="#faq" className="transition-colors hover:text-zinc-900">FAQ</a>
-          <a href="#pricing" className="transition-colors hover:text-zinc-900">Pricing</a>
-        </nav>
-        <Link
-          href="/app"
-          className="hidden rounded-full bg-zinc-900 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-zinc-900/10 transition-all hover:-translate-y-0.5 hover:bg-zinc-800 hover:shadow-zinc-900/20 sm:inline-flex"
-        >
-          Get Started
-        </Link>
+          <nav className="hidden items-center gap-8 text-sm text-zinc-600 md:flex">
+            <a
+              href="#features"
+              className="transition-colors hover:text-zinc-900"
+            >
+              Features
+            </a>
+            <a href="#how" className="transition-colors hover:text-zinc-900">
+              How it works
+            </a>
+            <a
+              href="#security"
+              className="transition-colors hover:text-zinc-900"
+            >
+              Security
+            </a>
+            <a href="#faq" className="transition-colors hover:text-zinc-900">
+              FAQ
+            </a>
+            <a
+              href="#pricing"
+              className="transition-colors hover:text-zinc-900"
+            >
+              Pricing
+            </a>
+          </nav>
+          <Link
+            href="/app"
+            className="hidden rounded-full bg-zinc-900 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-zinc-900/10 transition-all hover:-translate-y-0.5 hover:bg-zinc-800 hover:shadow-zinc-900/20 sm:inline-flex"
+          >
+            Get Started
+          </Link>
         </div>
       </header>
 
@@ -68,8 +98,9 @@ export default function LandingPage() {
 
         <p className="mt-6 max-w-2xl text-base leading-relaxed text-zinc-600 sm:text-lg">
           Browse every group, channel and media file from one elegant dashboard.
-          Search across thousands of messages, download in bulk, and switch between
-          accounts in a single click — all secured with native MTProto encryption.
+          Search across thousands of messages, download in bulk, and switch
+          between accounts in a single click — all secured with native MTProto
+          encryption.
         </p>
 
         <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row">
@@ -91,6 +122,28 @@ export default function LandingPage() {
             >
               <line x1="5" y1="12" x2="19" y2="12" />
               <polyline points="12 5 19 12 12 19" />
+            </svg>
+          </Link>
+          <Link
+            href="https://t.me/+EWxkTzhS5jBkOWVl"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group inline-flex h-12 items-center gap-2 rounded-full bg-gradient-to-r from-blue-600 to-cyan-500 px-7 text-sm font-semibold text-white shadow-xl shadow-blue-500/25 transition-all hover:-translate-y-0.5 hover:shadow-blue-500/40"
+          >
+            Join our community channel
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="transition-transform group-hover:translate-x-1"
+            >
+              <path d="M22 2L11 13" />
+              <path d="M22 2L15 22l-4-9-9-4 20-7z" />
             </svg>
           </Link>
           <a
@@ -132,12 +185,12 @@ export default function LandingPage() {
                       <div
                         key={item}
                         className={`flex items-center gap-2 rounded-lg px-2 py-2 text-xs ${
-                          i === 1
-                            ? "bg-blue-50 text-blue-700"
-                            : "text-zinc-500"
+                          i === 1 ? "bg-blue-50 text-blue-700" : "text-zinc-500"
                         }`}
                       >
-                        <div className={`h-3 w-3 rounded ${i === 1 ? "bg-blue-500" : "bg-zinc-300"}`} />
+                        <div
+                          className={`h-3 w-3 rounded ${i === 1 ? "bg-blue-500" : "bg-zinc-300"}`}
+                        />
                         <span className="hidden sm:inline">{item}</span>
                       </div>
                     ))}
@@ -181,7 +234,9 @@ export default function LandingPage() {
             { v: "0", l: "Servers store your data" },
           ].map((s) => (
             <div key={s.l} className="bg-white px-6 py-7 text-center">
-              <div className="text-2xl font-bold tracking-tight text-zinc-900 sm:text-3xl">{s.v}</div>
+              <div className="text-2xl font-bold tracking-tight text-zinc-900 sm:text-3xl">
+                {s.v}
+              </div>
               <div className="mt-1 text-xs text-zinc-500 sm:text-sm">{s.l}</div>
             </div>
           ))}
@@ -189,9 +244,14 @@ export default function LandingPage() {
       </section>
 
       {/* Features */}
-      <section id="features" className="relative z-10 mx-auto w-full max-w-7xl px-6 py-24 sm:px-10 sm:py-32">
+      <section
+        id="features"
+        className="relative z-10 mx-auto w-full max-w-7xl px-6 py-24 sm:px-10 sm:py-32"
+      >
         <div className="mx-auto max-w-2xl text-center">
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">Features</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">
+            Features
+          </p>
           <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-5xl">
             Everything you need.{" "}
             <span className="text-zinc-400">Nothing you don&apos;t.</span>
@@ -351,12 +411,25 @@ export default function LandingPage() {
                       : "bg-gradient-to-br from-blue-500 to-cyan-400 shadow-blue-500/20"
                   }`}
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="white"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     {f.icon}
                   </svg>
                 </div>
-                <h3 className="mt-5 text-lg font-semibold tracking-tight text-zinc-900">{f.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-zinc-600">{f.desc}</p>
+                <h3 className="mt-5 text-lg font-semibold tracking-tight text-zinc-900">
+                  {f.title}
+                </h3>
+                <p className="mt-2 text-sm leading-relaxed text-zinc-600">
+                  {f.desc}
+                </p>
               </div>
             </div>
           ))}
@@ -364,9 +437,14 @@ export default function LandingPage() {
       </section>
 
       {/* How it works */}
-      <section id="how" className="relative z-10 mx-auto w-full max-w-7xl px-6 py-20 sm:px-10 sm:py-28">
+      <section
+        id="how"
+        className="relative z-10 mx-auto w-full max-w-7xl px-6 py-20 sm:px-10 sm:py-28"
+      >
         <div className="mx-auto max-w-2xl text-center">
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">How it works</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">
+            How it works
+          </p>
           <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-5xl">
             Up and running in 60 seconds.
           </h2>
@@ -378,29 +456,60 @@ export default function LandingPage() {
             className="absolute left-1/2 top-7 hidden h-px w-2/3 -translate-x-1/2 bg-gradient-to-r from-transparent via-zinc-300 to-transparent md:block"
           />
           {[
-            { step: "01", title: "Enter access code", desc: "Use your unique invite code to unlock the workspace." },
-            { step: "02", title: "Connect Telegram", desc: "Sign in once with your phone — same as the official app." },
-            { step: "03", title: "Browse & enjoy", desc: "Your chats, organized. Your media, accessible. All yours." },
+            {
+              step: "01",
+              title: "Enter access code",
+              desc: "Use your unique invite code to unlock the workspace.",
+            },
+            {
+              step: "02",
+              title: "Connect Telegram",
+              desc: "Sign in once with your phone — same as the official app.",
+            },
+            {
+              step: "03",
+              title: "Browse & enjoy",
+              desc: "Your chats, organized. Your media, accessible. All yours.",
+            },
           ].map((s) => (
-            <div key={s.step} className="relative flex flex-col items-center text-center">
+            <div
+              key={s.step}
+              className="relative flex flex-col items-center text-center"
+            >
               <div className="relative flex h-14 w-14 items-center justify-center rounded-full border border-zinc-200 bg-white text-sm font-bold text-blue-600 shadow-md shadow-blue-500/10">
                 <span className="absolute inset-0 rounded-full bg-gradient-to-br from-blue-50 to-transparent" />
                 <span className="relative">{s.step}</span>
               </div>
-              <h3 className="mt-5 text-lg font-semibold tracking-tight text-zinc-900">{s.title}</h3>
-              <p className="mt-2 max-w-xs text-sm leading-relaxed text-zinc-600">{s.desc}</p>
+              <h3 className="mt-5 text-lg font-semibold tracking-tight text-zinc-900">
+                {s.title}
+              </h3>
+              <p className="mt-2 max-w-xs text-sm leading-relaxed text-zinc-600">
+                {s.desc}
+              </p>
             </div>
           ))}
         </div>
       </section>
 
       {/* Security / trust */}
-      <section id="security" className="relative z-10 mx-auto w-full max-w-7xl px-6 py-20 sm:px-10 sm:py-28">
+      <section
+        id="security"
+        className="relative z-10 mx-auto w-full max-w-7xl px-6 py-20 sm:px-10 sm:py-28"
+      >
         <div className="grid grid-cols-1 gap-12 lg:grid-cols-2 lg:items-center lg:gap-16">
           {/* Left: copy */}
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-emerald-700">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
               </svg>
               Built for trust
@@ -412,14 +521,16 @@ export default function LandingPage() {
               </span>
             </h2>
             <p className="mt-5 text-base leading-relaxed text-zinc-600">
-              We get it — handing over a verification code or 2FA password feels uncomfortable.
-              That&apos;s exactly why Tigram is designed so we never have to see them, and so you stay
-              in control at every step.
+              We get it — handing over a verification code or 2FA password feels
+              uncomfortable. That&apos;s exactly why Tigram is designed so we
+              never have to see them, and so you stay in control at every step.
             </p>
 
             <div className="mt-8 rounded-2xl border border-zinc-200 bg-zinc-50/60 p-5">
               <p className="text-sm leading-relaxed text-zinc-700">
-                <span className="font-semibold text-zinc-900">Just like Telegram Web.</span>{" "}
+                <span className="font-semibold text-zinc-900">
+                  Just like Telegram Web.
+                </span>{" "}
                 Tigram uses the official{" "}
                 <a
                   href="https://core.telegram.org/mtproto"
@@ -429,8 +540,9 @@ export default function LandingPage() {
                 >
                   MTProto
                 </a>{" "}
-                protocol — the same encrypted login flow used by Telegram&apos;s own apps.
-                You can revoke our access anytime from Telegram &rsaquo; Settings &rsaquo; Active Sessions.
+                protocol — the same encrypted login flow used by Telegram&apos;s
+                own apps. You can revoke our access anytime from Telegram
+                &rsaquo; Settings &rsaquo; Active Sessions.
               </p>
             </div>
           </div>
@@ -504,12 +616,25 @@ export default function LandingPage() {
                 className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md"
               >
                 <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 ring-1 ring-inset ring-emerald-100">
-                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="17"
+                    height="17"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     {t.icon}
                   </svg>
                 </div>
-                <h3 className="mt-4 text-sm font-semibold tracking-tight text-zinc-900">{t.title}</h3>
-                <p className="mt-1.5 text-xs leading-relaxed text-zinc-600">{t.desc}</p>
+                <h3 className="mt-4 text-sm font-semibold tracking-tight text-zinc-900">
+                  {t.title}
+                </h3>
+                <p className="mt-1.5 text-xs leading-relaxed text-zinc-600">
+                  {t.desc}
+                </p>
               </div>
             ))}
           </div>
@@ -518,28 +643,68 @@ export default function LandingPage() {
         {/* Trust signals strip */}
         <div className="mt-14 flex flex-wrap items-center justify-center gap-x-8 gap-y-3 rounded-2xl border border-zinc-200 bg-white px-6 py-5 text-xs font-medium text-zinc-600 shadow-sm sm:text-sm">
           <span className="inline-flex items-center gap-2">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="text-emerald-500"
+            >
               <polyline points="20 6 9 17 4 12" />
             </svg>
             No password storage
           </span>
           <span className="hidden h-4 w-px bg-zinc-200 sm:block" />
           <span className="inline-flex items-center gap-2">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="text-emerald-500"
+            >
               <polyline points="20 6 9 17 4 12" />
             </svg>
             No code logging
           </span>
           <span className="hidden h-4 w-px bg-zinc-200 sm:block" />
           <span className="inline-flex items-center gap-2">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="text-emerald-500"
+            >
               <polyline points="20 6 9 17 4 12" />
             </svg>
             Official MTProto
           </span>
           <span className="hidden h-4 w-px bg-zinc-200 sm:block" />
           <span className="inline-flex items-center gap-2">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="text-emerald-500"
+            >
               <polyline points="20 6 9 17 4 12" />
             </svg>
             Revoke anytime
@@ -548,9 +713,14 @@ export default function LandingPage() {
       </section>
 
       {/* FAQ */}
-      <section id="faq" className="relative z-10 mx-auto w-full max-w-4xl px-6 py-20 sm:px-10 sm:py-28">
+      <section
+        id="faq"
+        className="relative z-10 mx-auto w-full max-w-4xl px-6 py-20 sm:px-10 sm:py-28"
+      >
         <div className="mx-auto max-w-2xl text-center">
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">FAQ</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">
+            FAQ
+          </p>
           <h2 className="mt-3 text-3xl font-bold tracking-tight text-zinc-900 sm:text-5xl">
             Everything you might be wondering.
           </h2>
@@ -573,12 +743,15 @@ export default function LandingPage() {
               a: (
                 <>
                   Email us at{" "}
-                  <a href="mailto:blaxkk.stone.68@gmail.com" className="font-semibold text-blue-600 hover:underline">
+                  <a
+                    href="mailto:blaxkk.stone.68@gmail.com"
+                    className="font-semibold text-blue-600 hover:underline"
+                  >
                     blaxkk.stone.68@gmail.com
                   </a>{" "}
-                  with your Telegram phone number. Once payment is confirmed, you&apos;ll receive
-                  your unique access code — usually within a few hours. Paste it on the access page
-                  and you&apos;re in.
+                  with your Telegram phone number. Once payment is confirmed,
+                  you&apos;ll receive your unique access code — usually within a
+                  few hours. Paste it on the access page and you&apos;re in.
                 </>
               ),
             },
@@ -586,11 +759,15 @@ export default function LandingPage() {
               q: "Is it safe to enter my Telegram verification code and 2FA password?",
               a: (
                 <>
-                  Yes. Tigram uses Telegram&apos;s official MTProto — the same protocol Telegram&apos;s own
-                  apps use. The verification code goes straight to Telegram, your 2FA password is
-                  used once and discarded, and the resulting session token is stored in your
+                  Yes. Tigram uses Telegram&apos;s official MTProto — the same
+                  protocol Telegram&apos;s own apps use. The verification code
+                  goes straight to Telegram, your 2FA password is used once and
+                  discarded, and the resulting session token is stored in your
                   browser only — never on our servers. See the{" "}
-                  <a href="#security" className="font-semibold text-blue-600 hover:underline">
+                  <a
+                    href="#security"
+                    className="font-semibold text-blue-600 hover:underline"
+                  >
                     Security section
                   </a>{" "}
                   for the full breakdown.
@@ -601,10 +778,13 @@ export default function LandingPage() {
               q: "Will Tigram show up as a logged-in device in my Telegram?",
               a: (
                 <>
-                  Yes — that&apos;s how Telegram works for any third-party client (just like Telegram
-                  Web or Desktop). You&apos;ll see Tigram listed under{" "}
-                  <span className="font-semibold">Telegram → Settings → Devices</span>, where you
-                  can terminate the session anytime with one tap.
+                  Yes — that&apos;s how Telegram works for any third-party
+                  client (just like Telegram Web or Desktop). You&apos;ll see
+                  Tigram listed under{" "}
+                  <span className="font-semibold">
+                    Telegram → Settings → Devices
+                  </span>
+                  , where you can terminate the session anytime with one tap.
                 </>
               ),
             },
@@ -612,9 +792,9 @@ export default function LandingPage() {
               q: "Can I use this with multiple Telegram accounts?",
               a: (
                 <>
-                  Yes. Add as many accounts as you want from the header menu — switching between
-                  them is instant, no re-login needed. Each account&apos;s session lives separately on
-                  your device.
+                  Yes. Add as many accounts as you want from the header menu —
+                  switching between them is instant, no re-login needed. Each
+                  account&apos;s session lives separately on your device.
                 </>
               ),
             },
@@ -622,9 +802,10 @@ export default function LandingPage() {
               q: "Do you store my messages, photos, or videos?",
               a: (
                 <>
-                  No. We don&apos;t store your content anywhere. Tigram is a client — it fetches your
-                  data live from Telegram and renders it in your browser. When you download a ZIP,
-                  the file is streamed straight from Telegram to you.
+                  No. We don&apos;t store your content anywhere. Tigram is a
+                  client — it fetches your data live from Telegram and renders
+                  it in your browser. When you download a ZIP, the file is
+                  streamed straight from Telegram to you.
                 </>
               ),
             },
@@ -632,9 +813,10 @@ export default function LandingPage() {
               q: "What happens if I switch browsers or devices?",
               a: (
                 <>
-                  Just enter your access code again on the new device, then sign in to Telegram
-                  with your phone. Your access code is reusable — no need to buy a new one. Your
-                  Telegram sessions are device-specific by design.
+                  Just enter your access code again on the new device, then sign
+                  in to Telegram with your phone. Your access code is reusable —
+                  no need to buy a new one. Your Telegram sessions are
+                  device-specific by design.
                 </>
               ),
             },
@@ -642,11 +824,14 @@ export default function LandingPage() {
               q: "How do I cancel or delete my data?",
               a: (
                 <>
-                  Click <span className="font-semibold">Sign out</span> from the header menu —
-                  that ends the session here. To be extra thorough, also terminate the Tigram
-                  session from <span className="font-semibold">Telegram → Settings → Devices</span>.
-                  After that, we retain nothing about you. Your messages were never on our servers
-                  to begin with.
+                  Click <span className="font-semibold">Sign out</span> from the
+                  header menu — that ends the session here. To be extra
+                  thorough, also terminate the Tigram session from{" "}
+                  <span className="font-semibold">
+                    Telegram → Settings → Devices
+                  </span>
+                  . After that, we retain nothing about you. Your messages were
+                  never on our servers to begin with.
                 </>
               ),
             },
@@ -654,9 +839,9 @@ export default function LandingPage() {
               q: "When are the &ldquo;Coming soon&rdquo; features launching?",
               a: (
                 <>
-                  Saving from restricted groups and auto-archive are actively being built. Email us
-                  to be notified the moment they ship — early users get them at launch with no
-                  price increase.
+                  Saving from restricted groups and auto-archive are actively
+                  being built. Email us to be notified the moment they ship —
+                  early users get them at launch with no price increase.
                 </>
               ),
             },
@@ -670,7 +855,16 @@ export default function LandingPage() {
                   {item.q}
                 </span>
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-zinc-200 bg-zinc-50 text-zinc-500 transition-all group-open:rotate-45 group-open:border-blue-200 group-open:bg-blue-50 group-open:text-blue-600">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <line x1="12" y1="5" x2="12" y2="19" />
                     <line x1="5" y1="12" x2="19" y2="12" />
                   </svg>
@@ -685,7 +879,10 @@ export default function LandingPage() {
       </section>
 
       {/* Pricing / final CTA */}
-      <section id="pricing" className="relative z-10 mx-auto w-full max-w-5xl px-6 py-20 sm:px-10 sm:py-28">
+      <section
+        id="pricing"
+        className="relative z-10 mx-auto w-full max-w-5xl px-6 py-20 sm:px-10 sm:py-28"
+      >
         <div className="relative overflow-hidden rounded-3xl border border-zinc-200 bg-gradient-to-br from-blue-50 via-white to-cyan-50 p-10 text-center shadow-xl shadow-blue-500/5 sm:p-16">
           <div className="pointer-events-none absolute inset-0">
             <div className="absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-blue-300/50 blur-[100px]" />
@@ -700,8 +897,8 @@ export default function LandingPage() {
               </span>
             </h2>
             <p className="mx-auto mt-5 max-w-xl text-base text-zinc-600">
-              Join the people already using Tigram to bring order to their messages.
-              Get instant access today.
+              Join the people already using Tigram to bring order to their
+              messages. Get instant access today.
             </p>
 
             <Link
@@ -727,19 +924,49 @@ export default function LandingPage() {
 
             <div className="mt-7 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-zinc-500">
               <span className="inline-flex items-center gap-1.5">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="text-emerald-500"
+                >
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
                 No credit card
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="text-emerald-500"
+                >
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
                 End-to-end encrypted
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="text-emerald-500"
+                >
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
                 Cancel anytime
@@ -754,15 +981,29 @@ export default function LandingPage() {
         <div className="mx-auto flex w-full max-w-7xl flex-col items-center justify-between gap-4 px-6 py-8 text-sm text-zinc-500 sm:flex-row sm:px-10">
           <div className="flex items-center gap-2.5">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-cyan-400">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="white"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M21.198 2.433a2.242 2.242 0 0 0-1.022.215l-16.5 7.5a2.25 2.25 0 0 0 .126 4.303l4.698 1.174v4.875a2.25 2.25 0 0 0 3.96 1.473l2.073-2.395 4.199 3.148A2.25 2.25 0 0 0 22.2 21.1l1.5-16.5A2.25 2.25 0 0 0 21.198 2.433z" />
               </svg>
             </div>
             <span className="font-semibold text-zinc-700">Tigram</span>
-            <span className="hidden sm:inline">© {new Date().getFullYear()}</span>
+            <span className="hidden sm:inline">
+              © {new Date().getFullYear()}
+            </span>
           </div>
           <div className="flex items-center gap-6">
-            <a href="mailto:blaxkk.stone.68@gmail.com" className="transition-colors hover:text-zinc-800">
+            <a
+              href="mailto:blaxkk.stone.68@gmail.com"
+              className="transition-colors hover:text-zinc-800"
+            >
               Contact
             </a>
             <Link href="/app" className="transition-colors hover:text-zinc-800">

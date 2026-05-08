@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import LinksModal, { type LinkEntry } from "./LinksModal";
 import MediaViewer from "./MediaViewer";
 import Thumbnail from "./Thumbnail";
 
@@ -351,7 +352,7 @@ export default function GroupMedia({
   const [albumView, setAlbumView] = useState<MediaItem | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
-  const [linksCopied, setLinksCopied] = useState(false);
+  const [linksModalOpen, setLinksModalOpen] = useState(false);
 
   function openItem(item: MediaItem) {
     if (selectionMode) {
@@ -452,7 +453,6 @@ export default function GroupMedia({
   }
 
   function toggleSelection(items: SingleMediaItem[]) {
-    setLinksCopied(false);
     setSelectedIds((prev) => {
       const next = new Set(prev);
       const allSelected = items.every((item) => next.has(item.id));
@@ -467,37 +467,28 @@ export default function GroupMedia({
   function clearSelection() {
     setSelectedIds(new Set());
     setSelectionMode(false);
-    setLinksCopied(false);
   }
 
-  function selectedDownloadLinks(): string[] {
+  function buildLinkEntries(): LinkEntry[] {
     const origin = window.location.origin;
-    return selectedItems.map(
-      (item) => `${origin}${buildDownloadUrl(session, groupId, item.id)}`
-    );
+    return selectedItems.map((item) => ({
+      id: item.id,
+      fileName: item.fileName,
+      caption: item.caption,
+      type: item.type,
+      url: `${origin}${buildDownloadUrl(session, groupId, item.id)}`,
+    }));
   }
 
-  async function copySelectedLinks() {
-    const links = selectedDownloadLinks().join("\n");
-    if (!links) return;
-    try {
-      await window.navigator.clipboard.writeText(links);
-    } catch {
-      const el = document.createElement("textarea");
-      el.value = links;
-      el.setAttribute("readonly", "");
-      el.style.position = "fixed";
-      el.style.opacity = "0";
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand("copy");
-      document.body.removeChild(el);
-    }
-    setLinksCopied(true);
+  function openLinksModal() {
+    if (selectedItems.length === 0) return;
+    setLinksModalOpen(true);
   }
 
   function exportSelectedLinks() {
-    const links = selectedDownloadLinks().join("\n");
+    const links = buildLinkEntries()
+      .map((entry) => entry.url)
+      .join("\n");
     if (!links) return;
     const blob = new Blob([links], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -622,11 +613,11 @@ export default function GroupMedia({
       </button>
       <button
         type="button"
-        onClick={copySelectedLinks}
+        onClick={openLinksModal}
         disabled={selectedCount === 0}
         className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
       >
-        {linksCopied ? "Copied" : "Copy links"}
+        Copy links
       </button>
       <button
         type="button"
@@ -683,6 +674,13 @@ export default function GroupMedia({
     ]
       .filter(Boolean)
       .join(" · ");
+    const albumCaptions = Array.from(
+      new Set(
+        albumItems
+          .map((item) => item.caption.trim())
+          .filter((caption) => caption.length > 0)
+      )
+    );
 
     return (
       <div className="flex h-full flex-col">
@@ -712,7 +710,6 @@ export default function GroupMedia({
             type="button"
             onClick={() => {
               setSelectionMode((value) => !value);
-              setLinksCopied(false);
             }}
             className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
               selectionMode
@@ -724,6 +721,24 @@ export default function GroupMedia({
           </button>
         </div>
         {selectionToolbar}
+
+        {albumCaptions.length > 0 && (
+          <div className="border-b border-zinc-200 bg-zinc-50/60 px-3 py-3 sm:px-6 dark:border-zinc-800 dark:bg-zinc-900/40">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+              Message
+            </p>
+            <div className="space-y-2">
+              {albumCaptions.map((caption, i) => (
+                <p
+                  key={i}
+                  className="whitespace-pre-wrap wrap-break-word text-sm text-zinc-800 dark:text-zinc-200"
+                >
+                  {caption}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-3 sm:p-6">
           <div className={albumGridClass}>
@@ -813,6 +828,13 @@ export default function GroupMedia({
             onSelectItem={setViewer}
           />
         )}
+
+        {linksModalOpen && (
+          <LinksModal
+            entries={buildLinkEntries()}
+            onClose={() => setLinksModalOpen(false)}
+          />
+        )}
       </div>
     );
   }
@@ -848,7 +870,6 @@ export default function GroupMedia({
           type="button"
           onClick={() => {
             setSelectionMode((value) => !value);
-            setLinksCopied(false);
           }}
           className={`ml-auto shrink-0 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
             selectionMode
@@ -1161,6 +1182,12 @@ export default function GroupMedia({
         />
       )}
 
+      {linksModalOpen && (
+        <LinksModal
+          entries={buildLinkEntries()}
+          onClose={() => setLinksModalOpen(false)}
+        />
+      )}
     </div>
   );
 }

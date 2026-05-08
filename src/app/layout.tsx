@@ -1,10 +1,19 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist_Mono, Play, Siemreap } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const play = Play({
+  variable: "--font-play",
+  weight: ["400", "700"],
   subsets: ["latin"],
+  display: "swap",
+});
+
+const siemreap = Siemreap({
+  variable: "--font-siemreap",
+  subsets: ["khmer"],
+  weight: "400",
+  display: "swap",
 });
 
 const geistMono = Geist_Mono({
@@ -25,7 +34,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${play.variable} ${siemreap.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>
     </html>

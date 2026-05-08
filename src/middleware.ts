@@ -1,24 +1,19 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Allow requests to the auth API route and auth page
-  if (pathname === '/auth' || pathname === '/api/auth/login') {
+  // Allow requests to auth, admin routes, and static assets
+  if (
+    pathname === '/auth' || 
+    pathname === '/api/auth/login' || 
+    pathname.startsWith('/admin') ||
+    pathname.startsWith('/api/admin')
+  ) {
     return NextResponse.next();
   }
 
-  // Get configured access codes
-  const accessCodesRaw = process.env.ACCESS_CODES || "";
-  const validCodes = accessCodesRaw
-    .split(',')
-    .map((code) => code.trim())
-    .filter(Boolean);
-
-  // If no codes are configured at all, we could choose to allow or block.
-  // We will default to block to be safe. But localhost is usually allowed.
-  
   // Extract client IP for tracking
   let ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? 'Unknown';
   if (ip.includes(',')) {
@@ -33,26 +28,53 @@ export function middleware(request: NextRequest) {
   // Check for the auth cookie
   const authCookie = request.cookies.get('app_access_code')?.value;
 
-  // Verify the code
-  if (!authCookie || !validCodes.includes(authCookie)) {
-    console.log(`[Auth] Blocked request from IP: ${ip} (Invalid or missing code: ${authCookie})`);
-    
-    // Redirect unauthenticated users to the auth page
+  if (!authCookie) {
     const url = request.nextUrl.clone();
     url.pathname = '/auth';
     return NextResponse.rewrite(url);
   }
 
-  // If valid, log the successful access for tracking sharing
-  // (We log periodically or per request, here per request path)
-  if (!pathname.startsWith('/_next') && !pathname.includes('.')) {
-    console.log(`[Auth] Code '${authCookie}' used by IP ${ip} to access ${pathname}`);
+  // Verify the code against Supabase using REST API (faster for Edge middleware)
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      // If DB is not configured yet, let it pass or block depending on strictness.
+      // We block to be safe.
+      const url = request.nextUrl.clone();
+      url.pathname = '/auth';
+      return NextResponse.rewrite(url);
+    }
+
+    const res = await fetch(`${supabaseUrl}/rest/v1/access_codes?code=eq.${authCookie}&is_active=eq.true&select=id`, {
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`
+      }
+    });
+
+    const data = await res.json();
+
+    if (!data || data.length === 0) {
+      console.log(`[Auth] Blocked request from IP: ${ip} (Revoked or invalid code: ${authCookie})`);
+      const url = request.nextUrl.clone();
+      url.pathname = '/auth';
+      return NextResponse.rewrite(url);
+    }
+
+    // Valid code! Log it.
+    if (!pathname.startsWith('/_next') && !pathname.includes('.')) {
+      console.log(`[Auth] Code '${authCookie}' used by IP ${ip} to access ${pathname}`);
+    }
+
+  } catch (error) {
+    console.error("Middleware DB check failed", error);
   }
 
   return NextResponse.next();
 }
 
-// Apply this middleware to all paths except static assets
 export const config = {
   matcher: [
     '/((?!_next/static|_next/image|favicon.ico|public/).*)',

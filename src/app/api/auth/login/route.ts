@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { supabase } from '@/lib/supabase';
 
 export async function POST(request: Request) {
   try {
@@ -8,14 +9,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Access code is required" }, { status: 400 });
     }
 
-    const accessCodesRaw = process.env.ACCESS_CODES || "";
-    const validCodes = accessCodesRaw
-      .split(',')
-      .map((c) => c.trim())
-      .filter(Boolean);
+    const cleanCode = code.trim();
 
-    if (!validCodes.includes(code.trim())) {
+    // Check Supabase for the access code
+    const { data: accessCode, error: dbError } = await supabase
+      .from('access_codes')
+      .select('id, is_active')
+      .eq('code', cleanCode)
+      .single();
+
+    if (dbError || !accessCode) {
       return NextResponse.json({ error: "Invalid access code" }, { status: 401 });
+    }
+
+    if (!accessCode.is_active) {
+      return NextResponse.json({ error: "This access code has been revoked" }, { status: 403 });
     }
 
     // Create the response and set the cookie
@@ -24,7 +32,7 @@ export async function POST(request: Request) {
     // Set a cookie that expires in 365 days
     response.cookies.set({
       name: 'app_access_code',
-      value: code.trim(),
+      value: cleanCode,
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',

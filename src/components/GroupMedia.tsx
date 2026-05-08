@@ -511,16 +511,37 @@ export default function GroupMedia({
   }
 
   function downloadSelected() {
-    selectedItems.forEach((item, index) => {
-      window.setTimeout(() => {
-        const a = document.createElement("a");
-        a.href = buildDownloadUrl(session, groupId, item.id);
-        a.download = downloadFileName(item);
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      }, index * 150);
+    if (selectedItems.length === 0) return;
+
+    if (selectedItems.length === 1) {
+      const item = selectedItems[0];
+      const a = document.createElement("a");
+      a.href = buildDownloadUrl(session, groupId, item.id);
+      a.download = downloadFileName(item);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      return;
+    }
+
+    const safeTitle = (groupTitle || "telegram")
+      .replace(/[^\w\-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "telegram";
+
+    const params = new URLSearchParams({
+      sessionString: session,
+      groupId,
+      messageIds: selectedItems.map((item) => item.id).join(","),
+      filename: `${safeTitle}.zip`,
     });
+
+    const a = document.createElement("a");
+    a.href = `/api/telegram/download-zip?${params.toString()}`;
+    a.download = `${safeTitle}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
 
   function removeSelectedFromLocalList() {

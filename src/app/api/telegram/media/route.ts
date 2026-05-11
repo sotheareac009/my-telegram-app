@@ -3,6 +3,7 @@ import { Api } from "telegram";
 
 type Sender = {
   id: string;
+  accessHash: string;
   firstName: string;
   lastName: string;
   username: string;
@@ -48,6 +49,8 @@ function extractSender(msg: RawMessage): Sender | undefined {
     const entity = (msg as any)._sender;
     return {
       id: userId,
+      // accessHash is required to fetch profile photos without a warm cache
+      accessHash: entity?.accessHash?.toString() ?? "0",
       firstName: entity?.firstName ?? "",
       lastName: entity?.lastName ?? "",
       username: entity?.username ?? "",

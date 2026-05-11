@@ -19,6 +19,7 @@ function buildDownloadUrl(session: string, groupId: string, messageId: number) {
 
 export interface Sender {
   id: string;
+  accessHash: string;
   firstName: string;
   lastName: string;
   username: string;
@@ -366,18 +367,22 @@ function senderDisplayName(sender: Sender): string {
 const senderPhotoCache = new Map<string, string | "failed">();
 const senderPhotoInflight = new Map<string, Promise<string | "failed">>();
 
-function loadSenderPhoto(session: string, userId: string): Promise<string | "failed"> {
-  const key = `${session}::${userId}`;
+function loadSenderPhoto(session: string, sender: Sender): Promise<string | "failed"> {
+  const key = `${session}::${sender.id}`;
   const cached = senderPhotoCache.get(key);
   if (cached !== undefined) return Promise.resolve(cached);
   const inflight = senderPhotoInflight.get(key);
   if (inflight) return inflight;
   const promise = (async (): Promise<string | "failed"> => {
     try {
-      const res = await fetch("/api/telegram/dialog-photo", {
+      const res = await fetch("/api/telegram/user-photo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionString: session, groupId: userId }),
+        body: JSON.stringify({
+          sessionString: session,
+          userId: sender.id,
+          accessHash: sender.accessHash,
+        }),
       });
       if (!res.ok) { senderPhotoCache.set(key, "failed"); return "failed"; }
       const blob = await res.blob();
@@ -414,13 +419,13 @@ function UserAvatar({ session, sender }: { session: string; sender: Sender }) {
       else setPhotoUrl(cached);
       return;
     }
-    void loadSenderPhoto(session, sender.id).then((result) => {
+    void loadSenderPhoto(session, sender).then((result) => {
       if (cancelled) return;
       if (result === "failed") setFailed(true);
       else setPhotoUrl(result);
     });
     return () => { cancelled = true; };
-  }, [session, sender.id, cacheKey]);
+  }, [session, sender.id, sender.accessHash, cacheKey]);
 
   if (photoUrl && !failed) {
     return (

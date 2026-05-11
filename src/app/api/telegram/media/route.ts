@@ -3,10 +3,10 @@ import { Api } from "telegram";
 
 type Sender = {
   id: string;
-  accessHash: string;
   firstName: string;
   lastName: string;
   username: string;
+  photoBase64?: string;
 };
 
 type SingleMediaItem = {
@@ -36,11 +36,11 @@ type RawMessage = Awaited<
 >[number];
 
 /**
+ * Extract sender metadata from a GramJS message.
  * GramJS attaches the resolved User entity to msg._sender automatically
- * after getMessages — Telegram includes the full Users array alongside
- * messages in the same API response. No extra round-trips needed.
+ * after getMessages — Telegram includes the full Users array in the response.
  */
-function extractSender(msg: RawMessage): Sender | undefined {
+function extractSender(msg: RawMessage): Omit<Sender, "photoBase64"> | undefined {
   try {
     if (!msg.fromId) return undefined;
     if (!(msg.fromId instanceof Api.PeerUser)) return undefined;
@@ -49,8 +49,6 @@ function extractSender(msg: RawMessage): Sender | undefined {
     const entity = (msg as any)._sender;
     return {
       id: userId,
-      // accessHash is required to fetch profile photos without a warm cache
-      accessHash: entity?.accessHash?.toString() ?? "0",
       firstName: entity?.firstName ?? "",
       lastName: entity?.lastName ?? "",
       username: entity?.username ?? "",
@@ -58,6 +56,23 @@ function extractSender(msg: RawMessage): Sender | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Collect the resolved GramJS entity (_sender) for each unique user ID
+ * across a batch of messages. Called after getMessages so _sender is set.
+ */
+function collectSenderEntities(messages: RawMessage[]): Map<string, unknown> {
+  const map = new Map<string, unknown>();
+  for (const msg of messages) {
+    if (!(msg.fromId instanceof Api.PeerUser)) continue;
+    const userId = msg.fromId.userId.toString();
+    if (map.has(userId)) continue;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const entity = (msg as any)._sender;
+    if (entity) map.set(userId, entity);
+  }
+  return map;
 }
 
 
@@ -231,6 +246,44 @@ export async function POST(request: Request) {
           messages[0].id
         )
         : 0;
+
+    // ── Batch-download sender profile photos in parallel ────────────────
+    // The client is still connected and entities are warm — this is the
+    // only moment we can reliably call downloadProfilePhoto without needing
+    // a separate access-hash lookup.
+    const senderEntities = collectSenderEntities(messages);
+    const senderPhotos = new Map<string, string>(); // userId → base64 JPEG
+
+    await Promise.all(
+      [...senderEntities.entries()].map(async ([userId, entity]) => {
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const raw = await client.downloadProfilePhoto(entity as any, { isBig: false });
+          if (raw) {
+            const buf = raw instanceof Buffer ? raw : Buffer.from(raw);
+            senderPhotos.set(userId, buf.toString("base64"));
+          }
+        } catch {
+          // user has no profile photo — skip silently
+        }
+      })
+    );
+
+    // Attach photoBase64 to every entry that has a sender
+    for (const entry of entries) {
+      if (entry.sender) {
+        const photo = senderPhotos.get(entry.sender.id);
+        if (photo) entry.sender.photoBase64 = photo;
+      }
+      if (entry.album) {
+        for (const item of entry.album.items) {
+          if (item.sender) {
+            const photo = senderPhotos.get(item.sender.id);
+            if (photo) item.sender.photoBase64 = photo;
+          }
+        }
+      }
+    }
 
     await client.disconnect();
 

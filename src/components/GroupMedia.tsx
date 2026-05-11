@@ -19,10 +19,10 @@ function buildDownloadUrl(session: string, groupId: string, messageId: number) {
 
 export interface Sender {
   id: string;
-  accessHash: string;
   firstName: string;
   lastName: string;
   username: string;
+  photoBase64?: string;
 }
 
 export interface SingleMediaItem {
@@ -363,77 +363,17 @@ function senderDisplayName(sender: Sender): string {
   );
 }
 
-/** Module-level photo cache shared across all SenderChip instances. */
-const senderPhotoCache = new Map<string, string | "failed">();
-const senderPhotoInflight = new Map<string, Promise<string | "failed">>();
-
-function loadSenderPhoto(session: string, sender: Sender): Promise<string | "failed"> {
-  const key = `${session}::${sender.id}`;
-  const cached = senderPhotoCache.get(key);
-  if (cached !== undefined) return Promise.resolve(cached);
-  const inflight = senderPhotoInflight.get(key);
-  if (inflight) return inflight;
-  const promise = (async (): Promise<string | "failed"> => {
-    try {
-      const res = await fetch("/api/telegram/user-photo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionString: session,
-          userId: sender.id,
-          accessHash: sender.accessHash,
-        }),
-      });
-      if (!res.ok) { senderPhotoCache.set(key, "failed"); return "failed"; }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      senderPhotoCache.set(key, url);
-      return url;
-    } catch {
-      senderPhotoCache.set(key, "failed");
-      return "failed";
-    } finally {
-      senderPhotoInflight.delete(key);
-    }
-  })();
-  senderPhotoInflight.set(key, promise);
-  return promise;
-}
-
-function UserAvatar({ session, sender }: { session: string; sender: Sender }) {
+function UserAvatar({ sender }: { sender: Sender }) {
   const name = senderDisplayName(sender);
   const initials = name.split(" ").map((w) => w.replace("@", "")[0]).join("").slice(0, 2).toUpperCase();
   const color = SENDER_COLORS[parseInt(sender.id.slice(-1), 10) % SENDER_COLORS.length];
-  const cacheKey = `${session}::${sender.id}`;
-  const initial = senderPhotoCache.get(cacheKey);
-  const [photoUrl, setPhotoUrl] = useState<string | null>(
-    typeof initial === "string" && initial !== "failed" ? initial : null
-  );
-  const [failed, setFailed] = useState(initial === "failed");
 
-  useEffect(() => {
-    let cancelled = false;
-    const cached = senderPhotoCache.get(cacheKey);
-    if (cached !== undefined) {
-      if (cached === "failed") setFailed(true);
-      else setPhotoUrl(cached);
-      return;
-    }
-    void loadSenderPhoto(session, sender).then((result) => {
-      if (cancelled) return;
-      if (result === "failed") setFailed(true);
-      else setPhotoUrl(result);
-    });
-    return () => { cancelled = true; };
-  }, [session, sender.id, sender.accessHash, cacheKey]);
-
-  if (photoUrl && !failed) {
+  if (sender.photoBase64) {
     return (
       <img
-        src={photoUrl}
+        src={`data:image/jpeg;base64,${sender.photoBase64}`}
         alt={name}
         className="h-5 w-5 shrink-0 rounded-full object-cover shadow-sm ring-1 ring-white/20"
-        onError={() => setFailed(true)}
       />
     );
   }
@@ -444,13 +384,13 @@ function UserAvatar({ session, sender }: { session: string; sender: Sender }) {
   );
 }
 
-function SenderChip({ sender, session, overlay = false }: { sender: Sender; session: string; overlay?: boolean }) {
+function SenderChip({ sender, overlay = false }: { sender: Sender; overlay?: boolean }) {
   const name = senderDisplayName(sender);
 
   if (overlay) {
     return (
       <div className="flex items-center gap-1.5">
-        <UserAvatar session={session} sender={sender} />
+        <UserAvatar sender={sender} />
         <span className="max-w-[8rem] truncate text-[10px] font-medium leading-none text-white drop-shadow">
           {name}
         </span>
@@ -460,7 +400,7 @@ function SenderChip({ sender, session, overlay = false }: { sender: Sender; sess
 
   return (
     <div className="flex items-center gap-1.5">
-      <UserAvatar session={session} sender={sender} />
+      <UserAvatar sender={sender} />
       <span className="max-w-[8rem] truncate text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
         {name}
       </span>
@@ -1346,7 +1286,7 @@ export default function GroupMedia({
                           <div className="absolute inset-x-2 bottom-2 flex items-end justify-between gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                             <div className="flex-1 truncate text-[11px] text-white drop-shadow">
                               {item.sender ? (
-                                <SenderChip sender={item.sender} session={session} overlay />
+                                <SenderChip sender={item.sender} overlay />
                               ) : (
                                 <span>{item.caption || formatDate(item.date)}</span>
                               )}
@@ -1448,7 +1388,7 @@ export default function GroupMedia({
                           {/* Sender overlay — bottom-left, always visible */}
                           {item.sender && (
                             <div className="absolute bottom-2 left-2">
-                              <SenderChip sender={item.sender} session={session} overlay />
+                              <SenderChip sender={item.sender} overlay />
                             </div>
                           )}
                           {!item.album && !selectionMode && (
@@ -1526,7 +1466,7 @@ export default function GroupMedia({
                               {item.mimeType && ` · ${item.mimeType}`}
                             </span>
                             {item.sender && (
-                              <SenderChip sender={item.sender} session={session} />
+                              <SenderChip sender={item.sender} />
                             )}
                           </div>
                         </div>

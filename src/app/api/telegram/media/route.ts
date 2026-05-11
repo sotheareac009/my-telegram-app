@@ -20,6 +20,8 @@ type SingleMediaItem = {
   thumbBase64: string;
   duration: number;
   sender?: Sender;
+  /** True when the source chat prevents forwarding (noforwards flag). */
+  noforwards?: boolean;
 };
 
 type MediaEntry = SingleMediaItem & {
@@ -144,6 +146,7 @@ function buildItem(msg: RawMessage): SingleMediaItem | null {
     thumbBase64,
     duration,
     sender: extractSender(msg),
+    noforwards: (msg as unknown as { noforwards?: boolean }).noforwards ?? false,
   };
 }
 

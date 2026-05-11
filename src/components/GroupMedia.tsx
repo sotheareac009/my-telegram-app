@@ -36,6 +36,8 @@ export interface SingleMediaItem {
   thumbBase64: string;
   duration: number;
   sender?: Sender;
+  /** True when the source chat has "Restrict Saving Content" set. */
+  noforwards?: boolean;
 }
 
 export interface MediaItem extends SingleMediaItem {
@@ -641,6 +643,8 @@ export default function GroupMedia({
   const allMediaItems = flattenMedia(media);
   const selectedItems = allMediaItems.filter((item) => selectedIds.has(item.id));
   const selectedCount = selectedItems.length;
+  /** True if any selected item is from a noforwards-restricted chat. */
+  const isSelectedRestricted = selectedItems.some((item) => item.noforwards);
 
   function isSelected(items: SingleMediaItem[]): boolean {
     return items.length > 0 && items.every((item) => selectedIds.has(item.id));
@@ -1101,6 +1105,7 @@ export default function GroupMedia({
             currentChatId={groupId}
             loading={forwarding}
             error={forwardError}
+            isRestricted={isSelectedRestricted}
             onClose={() => setForwardModalOpen(false)}
             onSelectDestination={handleForwardToDestination}
           />
@@ -1627,6 +1632,7 @@ export default function GroupMedia({
           loading={forwarding}
           error={forwardError}
           session={session}
+          isRestricted={isSelectedRestricted}
           onClose={() => setForwardModalOpen(false)}
           onSelectDestination={handleForwardToDestination}
         />

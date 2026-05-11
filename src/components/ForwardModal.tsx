@@ -16,6 +16,8 @@ interface ForwardModalProps {
   currentChatId: string;
   loading: boolean;
   error?: string | null;
+  /** When true the selected items come from a noforwards-restricted chat. */
+  isRestricted?: boolean;
   onClose: () => void;
   onSelectDestination: (destinationId: string) => void;
 }
@@ -26,6 +28,7 @@ export default function ForwardModal({
   currentChatId,
   loading,
   error,
+  isRestricted = false,
   onClose,
   onSelectDestination,
 }: ForwardModalProps) {
@@ -88,6 +91,23 @@ export default function ForwardModal({
           </button>
         </div>
 
+        {/* Restricted content warning */}
+        {isRestricted && (
+          <div className="flex items-start gap-3 border-b border-amber-200/80 bg-amber-50 px-5 py-3 dark:border-amber-800/50 dark:bg-amber-950/30">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400">
+              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">Restricted content</p>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-amber-700 dark:text-amber-400">
+                This chat restricts forwarding. Files will be downloaded and re-uploaded — this may take longer for large media.
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 py-4">
           <label className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
             Search chats
@@ -137,8 +157,12 @@ export default function ForwardModal({
                                 </p>
                               </div>
                             </div>
-                            <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                              Forward
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                              isRestricted
+                                ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                                : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                            }`}>
+                              {isRestricted ? "Re-upload" : "Forward"}
                             </span>
                           </button>
                         </li>
@@ -176,8 +200,12 @@ export default function ForwardModal({
                                 </p>
                               </div>
                             </div>
-                            <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                              Forward
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                              isRestricted
+                                ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                                : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                            }`}>
+                              {isRestricted ? "Re-upload" : "Forward"}
                             </span>
                           </button>
                         </li>

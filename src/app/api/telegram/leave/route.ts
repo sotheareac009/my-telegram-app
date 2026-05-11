@@ -16,17 +16,19 @@ export async function POST(request: Request) {
     client = createClient(sessionString);
     await client.connect();
 
-    // Resolve the entity first so we can determine the correct leave method
     const entity = await client.getEntity(groupId);
 
-    if (
-      entity instanceof Api.Channel ||
-      entity instanceof Api.Chat
-    ) {
-      // Works for both channels and supergroups (megagroups)
+    if (entity instanceof Api.Channel) {
+      // Supergroups and channels
       await client.invoke(
-        new Api.channels.LeaveChannel({
-          channel: entity,
+        new Api.channels.LeaveChannel({ channel: entity })
+      );
+    } else if (entity instanceof Api.Chat) {
+      // Basic groups — use DeleteChatUser with self
+      await client.invoke(
+        new Api.messages.DeleteChatUser({
+          chatId: entity.id,
+          userId: new Api.InputUserSelf(),
         })
       );
     } else {
@@ -48,3 +50,4 @@ export async function POST(request: Request) {
     }
   }
 }
+

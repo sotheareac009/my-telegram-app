@@ -144,7 +144,6 @@ function buildItem(msg: RawMessage): SingleMediaItem | null {
     thumbBase64,
     duration,
     sender: extractSender(msg),
-
   };
 }
 

@@ -465,6 +465,9 @@ export default function GroupMedia({
   const [forwardError, setForwardError] = useState<string | null>(null);
   const [forwardSuccess, setForwardSuccess] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [leaveConfirming, setLeaveConfirming] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [leaveError, setLeaveError] = useState<string | null>(null);
   const availableForwardDestinations = destinationChats.filter((chat) => chat.id !== groupId);
   // React-managed highlight (replaces DOM class mutation)
   const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null);
@@ -477,6 +480,26 @@ export default function GroupMedia({
   function highlightMessage(id: number) {
     setHighlightedMessageId(id);
     setTimeout(() => setHighlightedMessageId(null), 3500);
+  }
+
+  async function handleLeave() {
+    setLeaving(true);
+    setLeaveError(null);
+    try {
+      const res = await fetch("/api/telegram/leave", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionString: session, groupId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to leave");
+      // Reload the page so the group disappears from the sidebar
+      window.location.reload();
+    } catch (err) {
+      setLeaveError(err instanceof Error ? err.message : "Failed to leave");
+      setLeaving(false);
+      setLeaveConfirming(false);
+    }
   }
 
   // ── Scroll restoration when navigating into/out of album view ──────────
@@ -1138,9 +1161,71 @@ export default function GroupMedia({
           >
             Select
           </button>
+          {/* Leave button */}
+          {!selectionMode && (
+            <button
+              type="button"
+              onClick={() => setLeaveConfirming(true)}
+              title="Leave this group or channel"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 text-zinc-400 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600 dark:border-zinc-700 dark:text-zinc-500 dark:hover:border-red-800 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+            >
+              {/* Door/exit icon */}
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
       {selectionToolbar}
+
+      {/* Leave confirmation modal */}
+      {leaveConfirming && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="mx-4 w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-100 dark:bg-red-950/40">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-600 dark:text-red-400">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+            </div>
+            <h2 className="mt-4 text-base font-semibold text-zinc-900 dark:text-zinc-100">
+              Leave &ldquo;{groupTitle}&rdquo;?
+            </h2>
+            <p className="mt-1.5 text-sm text-zinc-500 dark:text-zinc-400">
+              You will no longer receive messages from this {groupTitle.toLowerCase().includes("channel") ? "channel" : "group"}.
+              You can rejoin at any time if it&apos;s public.
+            </p>
+            {leaveError && (
+              <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600 dark:bg-red-950/40 dark:text-red-400">
+                {leaveError}
+              </p>
+            )}
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={() => { setLeaveConfirming(false); setLeaveError(null); }}
+                disabled={leaving}
+                className="flex-1 rounded-xl border border-zinc-200 px-4 py-2.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleLeave}
+                disabled={leaving}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-red-700 disabled:opacity-60"
+              >
+                {leaving && <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />}
+                {leaving ? "Leaving..." : "Leave"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {forwardSuccess && (
         <div className="mx-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">

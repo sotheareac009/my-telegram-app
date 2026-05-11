@@ -30,8 +30,4 @@ export async function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
-export const config = {
-  matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|public/).*)',
-  ],
-};
+// config is defined in middleware.ts (Next.js requires it inline there)

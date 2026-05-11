@@ -55,6 +55,8 @@ export default function MediaViewer({
     return `/api/telegram/download?${params.toString()}`;
   }, [session, groupId, messageId]);
 
+  console.log("FDDDDD",inlineUrl);
+
   const downloadUrl = useMemo(() => {
     const params = new URLSearchParams({
       sessionString: session,

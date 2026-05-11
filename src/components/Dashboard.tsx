@@ -47,6 +47,7 @@ export default function Dashboard({
   const [collapsed, setCollapsed] = useState(false);
   const [activeMenu, setActiveMenu] = useState("home");
   const [selectedGroup, setSelectedGroup] = useState<GroupInfo | null>(null);
+  console.log("Rendering Dashboard with session:", session,user, accounts, currentAccountId);
   const [activeFolderByType, setActiveFolderByType] = useState<{
     groups: string;
     channels: string;
@@ -60,6 +61,16 @@ export default function Dashboard({
   const [mediaCache, setMediaCache] = useState<Record<string, MediaCacheEntry>>(
     {},
   );
+
+  console.log("Dashboard state:", {
+    activeMenu,
+    selectedGroup,
+    activeFolderByType,
+    pageByType,
+    groupsCache,
+    foldersCache,
+    mediaCache,
+  });
 
   const handleGroupsLoaded = useCallback((groups: Group[]) => {
     setGroupsCache(groups);

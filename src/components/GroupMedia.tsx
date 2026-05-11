@@ -58,6 +58,8 @@ interface GroupMediaProps {
   cache: MediaCacheEntry | undefined;
   onCacheUpdate: (groupId: string, entry: MediaCacheEntry) => void;
   destinationChats?: ForwardDestination[];
+  /** Called after successfully leaving the group/channel. */
+  onLeave?: () => void;
 }
 
 type TabId = "all" | "photo" | "video" | "file";
@@ -441,6 +443,7 @@ export default function GroupMedia({
   cache,
   onCacheUpdate,
   destinationChats = [],
+  onLeave,
 }: GroupMediaProps) {
   console.log("Rendering GroupMedia with props:", { groupTitle, cache, destinationChats });
   const media = cache?.media ?? [];
@@ -493,8 +496,8 @@ export default function GroupMedia({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to leave");
-      // Reload the page so the group disappears from the sidebar
-      window.location.reload();
+      // Navigate back to the group/channel list (Dashboard handles this)
+      onLeave?.();
     } catch (err) {
       setLeaveError(err instanceof Error ? err.message : "Failed to leave");
       setLeaving(false);

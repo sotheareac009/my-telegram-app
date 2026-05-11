@@ -98,6 +98,21 @@ export default function Dashboard({
     setSelectedGroup(null);
   }
 
+  function handleLeaveGroup(groupId: string) {
+    // Remove the left chat from the cached list so it disappears instantly
+    setGroupsCache((prev) =>
+      prev ? prev.filter((g) => g.id !== groupId) : prev
+    );
+    // Also evict its media cache
+    setMediaCache((prev) => {
+      const next = { ...prev };
+      delete next[groupId];
+      return next;
+    });
+    // Navigate back to the groups/channels list
+    setSelectedGroup(null);
+  }
+
   function handleSwitchAccount(accountId: string) {
     setSelectedGroup(null);
     setActiveFolderByType({ groups: "all", channels: "all" });
@@ -295,6 +310,7 @@ export default function Dashboard({
                   cache={mediaCache[selectedGroup.id]}
                   onCacheUpdate={handleMediaCacheUpdate}
                   destinationChats={groupsCache ?? []}
+                  onLeave={() => handleLeaveGroup(selectedGroup.id)}
                 />
               )}
           </div>

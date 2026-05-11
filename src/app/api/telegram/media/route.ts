@@ -1,6 +1,13 @@
 import { createClient } from "@/lib/telegram";
 import { Api } from "telegram";
 
+type Sender = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  username: string;
+};
+
 type SingleMediaItem = {
   id: number;
   type: "photo" | "video" | "file";
@@ -11,6 +18,7 @@ type SingleMediaItem = {
   mimeType: string;
   thumbBase64: string;
   duration: number;
+  sender?: Sender;
 };
 
 type MediaEntry = SingleMediaItem & {
@@ -25,6 +33,30 @@ type RawMessage = Awaited<
     ReturnType<typeof createClient>["getMessages"]
   >
 >[number];
+
+/**
+ * GramJS attaches the resolved User entity to msg._sender automatically
+ * after getMessages — Telegram includes the full Users array alongside
+ * messages in the same API response. No extra round-trips needed.
+ */
+function extractSender(msg: RawMessage): Sender | undefined {
+  try {
+    if (!msg.fromId) return undefined;
+    if (!(msg.fromId instanceof Api.PeerUser)) return undefined;
+    const userId = msg.fromId.userId.toString();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const entity = (msg as any)._sender;
+    return {
+      id: userId,
+      firstName: entity?.firstName ?? "",
+      lastName: entity?.lastName ?? "",
+      username: entity?.username ?? "",
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 
 function buildItem(msg: RawMessage): SingleMediaItem | null {
   if (!msg.media) return null;
@@ -93,6 +125,8 @@ function buildItem(msg: RawMessage): SingleMediaItem | null {
     mimeType,
     thumbBase64,
     duration,
+    sender: extractSender(msg),
+
   };
 }
 
@@ -190,9 +224,9 @@ export async function POST(request: Request) {
     const nextOffsetId =
       messages.length > 0
         ? messages.reduce(
-            (min, m) => (m.id < min ? m.id : min),
-            messages[0].id
-          )
+          (min, m) => (m.id < min ? m.id : min),
+          messages[0].id
+        )
         : 0;
 
     await client.disconnect();

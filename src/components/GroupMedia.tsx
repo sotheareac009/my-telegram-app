@@ -17,6 +17,13 @@ function buildDownloadUrl(session: string, groupId: string, messageId: number) {
   return `/api/telegram/download?${params.toString()}`;
 }
 
+export interface Sender {
+  id: string;
+  firstName: string;
+  lastName: string;
+  username: string;
+}
+
 export interface SingleMediaItem {
   id: number;
   type: "photo" | "video" | "file";
@@ -27,6 +34,7 @@ export interface SingleMediaItem {
   mimeType: string;
   thumbBase64: string;
   duration: number;
+  sender?: Sender;
 }
 
 export interface MediaItem extends SingleMediaItem {
@@ -332,6 +340,129 @@ function readStoredLayout(key: string, fallback: VideoLayout): VideoLayout {
   return isVideoLayout(value) ? value : fallback;
 }
 
+/** Avatar colors — deterministic from the last digit of user ID. */
+const SENDER_COLORS = [
+  "from-blue-500 to-cyan-500",
+  "from-violet-500 to-purple-500",
+  "from-rose-500 to-pink-500",
+  "from-amber-500 to-orange-500",
+  "from-emerald-500 to-teal-500",
+  "from-sky-500 to-indigo-500",
+  "from-fuchsia-500 to-pink-500",
+  "from-lime-500 to-green-500",
+  "from-red-500 to-rose-500",
+  "from-cyan-500 to-blue-500",
+];
+
+function senderDisplayName(sender: Sender): string {
+  return (
+    [sender.firstName, sender.lastName].filter(Boolean).join(" ") ||
+    (sender.username ? `@${sender.username}` : "") ||
+    `User ${sender.id.slice(-5)}`
+  );
+}
+
+/** Module-level photo cache shared across all SenderChip instances. */
+const senderPhotoCache = new Map<string, string | "failed">();
+const senderPhotoInflight = new Map<string, Promise<string | "failed">>();
+
+function loadSenderPhoto(session: string, userId: string): Promise<string | "failed"> {
+  const key = `${session}::${userId}`;
+  const cached = senderPhotoCache.get(key);
+  if (cached !== undefined) return Promise.resolve(cached);
+  const inflight = senderPhotoInflight.get(key);
+  if (inflight) return inflight;
+  const promise = (async (): Promise<string | "failed"> => {
+    try {
+      const res = await fetch("/api/telegram/dialog-photo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionString: session, groupId: userId }),
+      });
+      if (!res.ok) { senderPhotoCache.set(key, "failed"); return "failed"; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      senderPhotoCache.set(key, url);
+      return url;
+    } catch {
+      senderPhotoCache.set(key, "failed");
+      return "failed";
+    } finally {
+      senderPhotoInflight.delete(key);
+    }
+  })();
+  senderPhotoInflight.set(key, promise);
+  return promise;
+}
+
+function UserAvatar({ session, sender }: { session: string; sender: Sender }) {
+  const name = senderDisplayName(sender);
+  const initials = name.split(" ").map((w) => w.replace("@", "")[0]).join("").slice(0, 2).toUpperCase();
+  const color = SENDER_COLORS[parseInt(sender.id.slice(-1), 10) % SENDER_COLORS.length];
+  const cacheKey = `${session}::${sender.id}`;
+  const initial = senderPhotoCache.get(cacheKey);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(
+    typeof initial === "string" && initial !== "failed" ? initial : null
+  );
+  const [failed, setFailed] = useState(initial === "failed");
+
+  useEffect(() => {
+    let cancelled = false;
+    const cached = senderPhotoCache.get(cacheKey);
+    if (cached !== undefined) {
+      if (cached === "failed") setFailed(true);
+      else setPhotoUrl(cached);
+      return;
+    }
+    void loadSenderPhoto(session, sender.id).then((result) => {
+      if (cancelled) return;
+      if (result === "failed") setFailed(true);
+      else setPhotoUrl(result);
+    });
+    return () => { cancelled = true; };
+  }, [session, sender.id, cacheKey]);
+
+  if (photoUrl && !failed) {
+    return (
+      <img
+        src={photoUrl}
+        alt={name}
+        className="h-5 w-5 shrink-0 rounded-full object-cover shadow-sm ring-1 ring-white/20"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gradient-to-br ${color} text-[9px] font-bold text-white shadow-sm`}>
+      {initials || "?"}
+    </div>
+  );
+}
+
+function SenderChip({ sender, session, overlay = false }: { sender: Sender; session: string; overlay?: boolean }) {
+  const name = senderDisplayName(sender);
+
+  if (overlay) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <UserAvatar session={session} sender={sender} />
+        <span className="max-w-[8rem] truncate text-[10px] font-medium leading-none text-white drop-shadow">
+          {name}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <UserAvatar session={session} sender={sender} />
+      <span className="max-w-[8rem] truncate text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+        {name}
+      </span>
+    </div>
+  );
+}
+
 /**
  * Overlay rendered on top of a photo or video card when it is the active
  * search-jump target. Shows a pulsing blue border glow + a "Search Result" pill.
@@ -366,6 +497,7 @@ export default function GroupMedia({
   onCacheUpdate,
   destinationChats = [],
 }: GroupMediaProps) {
+  console.log("Rendering GroupMedia with props:", { groupTitle, cache, destinationChats });
   const media = cache?.media ?? [];
   const hasMore = cache?.hasMore ?? false;
   const nextOffsetId = cache?.nextOffsetId ?? 0;
@@ -1206,8 +1338,14 @@ export default function GroupMedia({
                             className="h-full w-full transition-transform group-hover:scale-105"
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-                          <div className="absolute bottom-2 left-2 right-2 truncate text-[11px] text-white opacity-0 transition-opacity group-hover:opacity-100">
-                            {item.caption || formatDate(item.date)}
+                          <div className="absolute inset-x-2 bottom-2 flex items-end justify-between gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                            <div className="flex-1 truncate text-[11px] text-white drop-shadow">
+                              {item.sender ? (
+                                <SenderChip sender={item.sender} session={session} overlay />
+                              ) : (
+                                <span>{item.caption || formatDate(item.date)}</span>
+                              )}
+                            </div>
                           </div>
                           {isHighlighted && <SearchResultBadge />}
                         </div>
@@ -1302,6 +1440,12 @@ export default function GroupMedia({
                               {formatFileSize(item.fileSize)}
                             </span>
                           )}
+                          {/* Sender overlay — bottom-left, always visible */}
+                          {item.sender && (
+                            <div className="absolute bottom-2 left-2">
+                              <SenderChip sender={item.sender} session={session} overlay />
+                            </div>
+                          )}
                           {!item.album && !selectionMode && (
                             <a
                               href={buildDownloadUrl(session, groupId, item.id)}
@@ -1371,10 +1515,15 @@ export default function GroupMedia({
                               </span>
                             )}
                           </p>
-                          <p className="mt-0.5 truncate text-xs text-zinc-500">
-                            {formatFileSize(item.fileSize)}
-                            {item.mimeType && ` · ${item.mimeType}`}
-                          </p>
+                          <div className="mt-0.5 flex items-center gap-2 truncate text-xs text-zinc-500">
+                            <span className="truncate">
+                              {formatFileSize(item.fileSize)}
+                              {item.mimeType && ` · ${item.mimeType}`}
+                            </span>
+                            {item.sender && (
+                              <SenderChip sender={item.sender} session={session} />
+                            )}
+                          </div>
                         </div>
                         <span className="hidden shrink-0 text-xs text-zinc-400 sm:block">
                           {formatDate(item.date)}

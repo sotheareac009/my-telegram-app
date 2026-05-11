@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import LinksModal, { type LinkEntry } from "./LinksModal";
+import ForwardModal, { type ForwardDestination } from "./ForwardModal";
 import MediaViewer from "./MediaViewer";
 import MessageSearch from "./MessageSearch";
 import Thumbnail from "./Thumbnail";
@@ -47,6 +48,7 @@ interface GroupMediaProps {
   groupTitle: string;
   cache: MediaCacheEntry | undefined;
   onCacheUpdate: (groupId: string, entry: MediaCacheEntry) => void;
+  destinationChats?: ForwardDestination[];
 }
 
 type TabId = "all" | "photo" | "video" | "file";
@@ -362,6 +364,7 @@ export default function GroupMedia({
   groupTitle,
   cache,
   onCacheUpdate,
+  destinationChats = [],
 }: GroupMediaProps) {
   const media = cache?.media ?? [];
   const hasMore = cache?.hasMore ?? false;
@@ -380,7 +383,12 @@ export default function GroupMedia({
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [linksModalOpen, setLinksModalOpen] = useState(false);
+  const [forwardModalOpen, setForwardModalOpen] = useState(false);
+  const [forwarding, setForwarding] = useState(false);
+  const [forwardError, setForwardError] = useState<string | null>(null);
+  const [forwardSuccess, setForwardSuccess] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const availableForwardDestinations = destinationChats.filter((chat) => chat.id !== groupId);
   // React-managed highlight (replaces DOM class mutation)
   const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null);
   // ID to jump to after a media reload triggered by search
@@ -563,6 +571,49 @@ export default function GroupMedia({
     }));
   }
 
+  async function handleForwardToDestination(destinationId: string) {
+    if (selectedCount === 0) return;
+    setForwardError(null);
+    setForwarding(true);
+
+    try {
+      const response = await fetch("/api/telegram/forward", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionString: session,
+          fromGroupId: groupId,
+          toGroupId: destinationId,
+          messageIds: selectedItems.map((item) => item.id),
+        }),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result?.error || "Failed to forward messages");
+      }
+
+      const target = destinationChats.find((chat) => chat.id === destinationId);
+      setForwardSuccess(
+        `Forwarded ${selectedCount} item${selectedCount === 1 ? "" : "s"} to ${
+          target?.title ?? "the selected chat"
+        }.`,
+      );
+      setForwardModalOpen(false);
+      clearSelection();
+    } catch (error: unknown) {
+      setForwardError(error instanceof Error ? error.message : "Failed to forward messages");
+    } finally {
+      setForwarding(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!forwardSuccess) return;
+    const timeout = window.setTimeout(() => setForwardSuccess(null), 4000);
+    return () => window.clearTimeout(timeout);
+  }, [forwardSuccess]);
+
   function openLinksModal() {
     if (selectedItems.length === 0) return;
     setLinksModalOpen(true);
@@ -712,6 +763,22 @@ export default function GroupMedia({
       </button>
       <button
         type="button"
+        onClick={() => {
+          setForwardError(null);
+          setForwardModalOpen(true);
+        }}
+        disabled={selectedCount === 0 || availableForwardDestinations.length === 0}
+        title={
+          availableForwardDestinations.length === 0
+            ? "No available destination chats"
+            : undefined
+        }
+        className="rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      >
+        Forward
+      </button>
+      <button
+        type="button"
         onClick={removeSelectedFromLocalList}
         disabled={selectedCount === 0}
         className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-40 dark:border-red-900/60 dark:text-red-400 dark:hover:bg-red-950/40"
@@ -804,6 +871,12 @@ export default function GroupMedia({
           </button>
         </div>
         {selectionToolbar}
+
+        {forwardSuccess && (
+          <div className="mx-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
+            {forwardSuccess}
+          </div>
+        )}
 
         {albumCaptions.length > 0 && (
           <div className="border-b border-zinc-200 bg-zinc-50/60 px-3 py-3 sm:px-6 dark:border-zinc-800 dark:bg-zinc-900/40">
@@ -918,6 +991,17 @@ export default function GroupMedia({
             onClose={() => setLinksModalOpen(false)}
           />
         )}
+        {forwardModalOpen && (
+          <ForwardModal
+            session={session}
+            destinations={availableForwardDestinations}
+            currentChatId={groupId}
+            loading={forwarding}
+            error={forwardError}
+            onClose={() => setForwardModalOpen(false)}
+            onSelectDestination={handleForwardToDestination}
+          />
+        )}
       </div>
     );
   }
@@ -980,6 +1064,12 @@ export default function GroupMedia({
         </div>
       </div>
       {selectionToolbar}
+
+      {forwardSuccess && (
+        <div className="mx-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
+          {forwardSuccess}
+        </div>
+      )}
 
       {/* Search-jump view banner — shown when grid is reloaded from a search offset */}
       {isSearchJumpView && !selectionMode && (
@@ -1346,6 +1436,17 @@ export default function GroupMedia({
         <LinksModal
           entries={buildLinkEntries()}
           onClose={() => setLinksModalOpen(false)}
+        />
+      )}
+      {forwardModalOpen && (
+        <ForwardModal
+          destinations={availableForwardDestinations}
+          currentChatId={groupId}
+          loading={forwarding}
+          error={forwardError}
+          session={session}
+          onClose={() => setForwardModalOpen(false)}
+          onSelectDestination={handleForwardToDestination}
         />
       )}
 

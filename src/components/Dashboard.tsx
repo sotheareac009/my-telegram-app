@@ -283,6 +283,7 @@ export default function Dashboard({
                   groupTitle={selectedGroup.title}
                   cache={mediaCache[selectedGroup.id]}
                   onCacheUpdate={handleMediaCacheUpdate}
+                  destinationChats={groupsCache ?? []}
                 />
               )}
           </div>

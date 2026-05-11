@@ -124,6 +124,12 @@ export default function LandingPage() {
               <polyline points="12 5 19 12 12 19" />
             </svg>
           </Link>
+          <a
+            href="#features"
+            className="inline-flex h-12 items-center gap-2 rounded-full border border-zinc-200 bg-white px-7 text-sm font-semibold text-zinc-800 shadow-sm transition-all hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md"
+          >
+            See features
+          </a>
           <Link
             href="https://t.me/+EWxkTzhS5jBkOWVl"
             target="_blank"
@@ -146,12 +152,6 @@ export default function LandingPage() {
               <path d="M22 2L15 22l-4-9-9-4 20-7z" />
             </svg>
           </Link>
-          <a
-            href="#features"
-            className="inline-flex h-12 items-center gap-2 rounded-full border border-zinc-200 bg-white px-7 text-sm font-semibold text-zinc-800 shadow-sm transition-all hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-md"
-          >
-            See features
-          </a>
         </div>
 
         <p className="mt-5 text-xs text-zinc-500">

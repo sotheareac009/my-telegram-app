@@ -51,6 +51,10 @@ export default function Dashboard({
     groups: string;
     channels: string;
   }>({ groups: "all", channels: "all" });
+  const [pageByType, setPageByType] = useState<{
+    groups: number;
+    channels: number;
+  }>({ groups: 1, channels: 1 });
   const [groupsCache, setGroupsCache] = useState<Group[] | null>(null);
   const [foldersCache, setFoldersCache] = useState<ChatFolder[] | null>(null);
   const [mediaCache, setMediaCache] = useState<Record<string, MediaCacheEntry>>(
@@ -86,6 +90,7 @@ export default function Dashboard({
   function handleSwitchAccount(accountId: string) {
     setSelectedGroup(null);
     setActiveFolderByType({ groups: "all", channels: "all" });
+    setPageByType({ groups: 1, channels: 1 });
     setGroupsCache(null);
     setFoldersCache(null);
     setMediaCache({});
@@ -265,6 +270,8 @@ export default function Dashboard({
                   folders={foldersCache}
                   onGroupsLoaded={handleGroupsLoaded}
                   onFoldersLoaded={handleFoldersLoaded}
+                  page={pageByType[activeMenu as 'groups' | 'channels']}
+                  onPageChange={(page) => setPageByType(prev => ({ ...prev, [activeMenu]: page }))}
                 />
               )}
 

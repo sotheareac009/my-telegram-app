@@ -34,6 +34,8 @@ interface GroupsGridProps {
   folders: ChatFolder[] | null;
   onGroupsLoaded: (groups: Group[]) => void;
   onFoldersLoaded: (folders: ChatFolder[]) => void;
+  page: number;
+  onPageChange: (page: number) => void;
 }
 
 const GRADIENT_COLORS = [
@@ -64,11 +66,10 @@ function formatTime(timestamp: number): string {
 
 export default function GroupsGrid({
   session, type, activeFolderId, onActiveFolderChange, onGroupSelect,
-  groups, folders, onGroupsLoaded, onFoldersLoaded,
+  groups, folders, onGroupsLoaded, onFoldersLoaded, page, onPageChange,
 }: GroupsGridProps) {
   const loading = groups === null || folders === null;
   const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
   const perPage = 20;
 
   useEffect(() => {
@@ -133,7 +134,7 @@ export default function GroupsGrid({
               type="text"
               placeholder={`Filter ${title.toLowerCase()}…`}
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              onChange={(e) => { setSearch(e.target.value); onPageChange(1); }}
               className="h-9 w-full rounded-xl border border-zinc-200 bg-zinc-50 pl-9 pr-4 text-sm outline-none transition-all focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-500/15 dark:border-zinc-700 dark:bg-zinc-800/80 dark:text-zinc-100 dark:focus:bg-zinc-800"
             />
           </div>
@@ -151,7 +152,7 @@ export default function GroupsGrid({
                 <button
                   key={folder.id}
                   type="button"
-                  onClick={() => { onActiveFolderChange(folder.id); setPage(1); }}
+                  onClick={() => { onActiveFolderChange(folder.id); onPageChange(1); }}
                   className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
                     isActive
                       ? "bg-blue-600 text-white shadow-sm shadow-blue-600/30"
@@ -258,7 +259,10 @@ export default function GroupsGrid({
       {totalPages > 1 && (
         <div className="flex shrink-0 items-center justify-center gap-1.5 border-t border-zinc-200/80 bg-white/80 px-4 py-3 backdrop-blur-sm dark:border-zinc-800/80 dark:bg-zinc-950/80">
           <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            onClick={() => {
+              console.log(`Pagination clicked: previous for ${title.toLowerCase()}`);
+              onPageChange(Math.max(1, page - 1));
+            }}
             disabled={page === 1}
             className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-800"
           >
@@ -267,7 +271,10 @@ export default function GroupsGrid({
           {Array.from({ length: totalPages }).map((_, i) => (
             <button
               key={i}
-              onClick={() => setPage(i + 1)}
+              onClick={() => {
+                console.log(`Pagination clicked for ${title.toLowerCase()} page ${i + 1}`);
+                onPageChange(i + 1);
+              }}
               className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[13px] font-semibold transition-colors ${
                 currentPage === i + 1
                   ? "bg-blue-600 text-white shadow-sm"
@@ -278,7 +285,10 @@ export default function GroupsGrid({
             </button>
           ))}
           <button
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            onClick={() => {
+              console.log(`Pagination clicked: next for ${title.toLowerCase()}`);
+              onPageChange(Math.min(totalPages, page + 1));
+            }}
             disabled={page === totalPages}
             className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-50 disabled:opacity-40 dark:border-zinc-700 dark:hover:bg-zinc-800"
           >

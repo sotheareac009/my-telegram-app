@@ -261,18 +261,6 @@ export default function LandingPage() {
         <div className="mt-16 grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
           {[
             {
-              title: "Save from restricted groups",
-              desc: "Download and forward media from groups and channels with content protection turned on — straight to your archive.",
-              comingSoon: true,
-              icon: (
-                <>
-                  <path d="M12 15V3" />
-                  <path d="m7 10 5 5 5-5" />
-                  <path d="M5 21h14" />
-                </>
-              ),
-            },
-            {
               title: "Auto-archive new media",
               desc: "Pick a chat, set it and forget it. New photos and videos save to your private archive the moment they arrive.",
               comingSoon: true,
@@ -284,6 +272,19 @@ export default function LandingPage() {
                 </>
               ),
             },
+            {
+              title: "Save from restricted groups",
+              desc: "Download and forward media from groups and channels with content protection turned on — straight to your archive.",
+              comingSoon: false,
+              icon: (
+                <>
+                  <path d="M12 15V3" />
+                  <path d="m7 10 5 5 5-5" />
+                  <path d="M5 21h14" />
+                </>
+              ),
+            },
+            
             {
               title: "Unified dashboard",
               desc: "Every group, channel, and DM in one organized view. No more endless scrolling.",

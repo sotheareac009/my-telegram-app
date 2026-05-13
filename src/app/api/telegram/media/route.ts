@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/telegram";
-import { Api } from "telegram";
+import { Api, utils as telegramUtils } from "telegram";
 
 type Sender = {
   id: string;
@@ -120,7 +120,11 @@ function buildItem(msg: RawMessage): SingleMediaItem | null {
         (s) => s instanceof Api.PhotoStrippedSize
       );
       if (stripped instanceof Api.PhotoStrippedSize) {
-        thumbBase64 = Buffer.from(stripped.bytes).toString("base64");
+        // PhotoStrippedSize bytes are not a valid standalone JPEG —
+        // strippedPhotoToJpg prepends the standard JPEG header (patching the
+        // width/height bytes from the stripped payload) and appends the footer.
+        const jpg = telegramUtils.strippedPhotoToJpg(Buffer.from(stripped.bytes));
+        thumbBase64 = Buffer.from(jpg).toString("base64");
       }
     }
   } else if (msg.media instanceof Api.MessageMediaDocument) {
@@ -130,7 +134,11 @@ function buildItem(msg: RawMessage): SingleMediaItem | null {
         (s) => s instanceof Api.PhotoStrippedSize
       );
       if (stripped instanceof Api.PhotoStrippedSize) {
-        thumbBase64 = Buffer.from(stripped.bytes).toString("base64");
+        // PhotoStrippedSize bytes are not a valid standalone JPEG —
+        // strippedPhotoToJpg prepends the standard JPEG header (patching the
+        // width/height bytes from the stripped payload) and appends the footer.
+        const jpg = telegramUtils.strippedPhotoToJpg(Buffer.from(stripped.bytes));
+        thumbBase64 = Buffer.from(jpg).toString("base64");
       }
     }
   }

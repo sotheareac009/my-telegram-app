@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Dashboard from "@/components/Dashboard";
+import { ForwardJobsProvider } from "@/components/ForwardJobsContext";
 
 type Step = "phone" | "code" | "password" | "done";
 
@@ -282,16 +283,18 @@ export default function Home() {
   // Dashboard
   if (step === "done" && user) {
     return (
-      <Dashboard
-        key={currentAccountId || sessionString}
-        user={user}
-        session={sessionString}
-        accounts={accounts}
-        currentAccountId={currentAccountId}
-        onSwitchAccount={handleSwitchAccount}
-        onAddAccount={startAddAccount}
-        onSignOut={handleSignOut}
-      />
+      <ForwardJobsProvider>
+        <Dashboard
+          key={currentAccountId || sessionString}
+          user={user}
+          session={sessionString}
+          accounts={accounts}
+          currentAccountId={currentAccountId}
+          onSwitchAccount={handleSwitchAccount}
+          onAddAccount={startAddAccount}
+          onSignOut={handleSignOut}
+        />
+      </ForwardJobsProvider>
     );
   }
 

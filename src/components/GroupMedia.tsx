@@ -1,27 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import LinksModal, { type LinkEntry } from "./LinksModal";
-import ForwardModal, { type ForwardDestination, type ForwardProgress } from "./ForwardModal";
-import FloatingForwardProgress from "./FloatingForwardProgress";
+import ForwardModal, { type ForwardDestination } from "./ForwardModal";
 import MediaViewer from "./MediaViewer";
 import MessageSearch from "./MessageSearch";
 import Thumbnail from "./Thumbnail";
-
-/** A single in-flight forward operation. Multiple can run concurrently. */
-type ForwardJobState = {
-  id: string;
-  progress: ForwardProgress;
-  /** Destination chat id this job is forwarding to. */
-  destinationId: string;
-  /** Sorted message IDs being forwarded. Used to detect duplicates on retry. */
-  messageIdsKey: string;
-};
-
-/** Build a deterministic key from a list of message IDs, ignoring order. */
-function makeMessageIdsKey(ids: number[]): string {
-  return [...ids].sort((a, b) => a - b).join(",");
-}
+import { useForwardJobs } from "./ForwardJobsContext";
 
 /**
  * Human-readable summary of what's being forwarded. For a single item we use
@@ -45,19 +30,6 @@ function describeForwardContent(
   if (counts.file) parts.push(`${counts.file} file${counts.file === 1 ? "" : "s"}`);
   return parts.join(" · ");
 }
-
-/** NDJSON events streamed by /api/telegram/forward (mirrors ProgressEvent in route.ts). */
-type ForwardEvent =
-  | { type: "start"; total: number }
-  | { type: "forwarding" }
-  | { type: "message_start"; messageId: number; index: number; size: number | null }
-  | { type: "download_progress"; messageId: number; index: number; loaded: number; total: number }
-  | { type: "download_done"; messageId: number; index: number }
-  | { type: "upload_progress"; messageId: number; index: number; progress: number }
-  | { type: "upload_done"; messageId: number; index: number }
-  | { type: "message_skipped"; messageId: number; index: number; reason: string }
-  | { type: "done"; method: "forward" | "resend" }
-  | { type: "error"; message: string };
 
 function buildDownloadUrl(session: string, groupId: string, messageId: number) {
   const params = new URLSearchParams({
@@ -518,27 +490,37 @@ export default function GroupMedia({
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [linksModalOpen, setLinksModalOpen] = useState(false);
   const [forwardModalOpen, setForwardModalOpen] = useState(false);
-  const [forwardError, setForwardError] = useState<string | null>(null);
-  const [forwardSuccess, setForwardSuccess] = useState<string | null>(null);
-  // Concurrent forward jobs — each fetch runs independently. Closing the
-  // modal mid-flight keeps the job running and turns it into a floating
-  // progress card; starting a new forward spawns a new job alongside it.
-  const [forwardJobs, setForwardJobs] = useState<ForwardJobState[]>([]);
-  // The job whose progress is rendered inline inside the modal (vs. floating).
-  // Cleared when the modal closes so re-opening the modal shows a fresh chooser.
+  // Forward jobs live in a global context so they survive when this component
+  // unmounts (e.g., user navigates back to the channel list). The floating
+  // progress cards and success/error toasts are rendered at the provider level.
+  const { jobs: allForwardJobs, startForward, cancelForward, suppressFloating } =
+    useForwardJobs();
+  // The job whose progress is rendered inline inside the modal. Cleared when
+  // the modal closes so re-opening the modal shows a fresh chooser.
   const [activeForwardJobId, setActiveForwardJobId] = useState<string | null>(null);
-  // AbortControllers live outside React state — they aren't serializable and
-  // would cause stale-closure problems. Looked up by job id when cancelling.
-  const forwardControllersRef = useRef<Map<string, AbortController>>(new Map());
-  // The job displayed inline inside the modal (if any). All other jobs float.
   const activeInlineJob = forwardModalOpen
-    ? forwardJobs.find((job) => job.id === activeForwardJobId) ?? null
+    ? allForwardJobs.find((job) => job.id === activeForwardJobId) ?? null
     : null;
-  const floatingJobs = forwardJobs.filter((job) => job.id !== activeInlineJob?.id);
-  // Set of destination IDs that currently have at least one in-flight forward.
-  // Drives the "Forwarding…" badge on destination buttons so the user can see
-  // at a glance which chats already have an active job.
-  const inProgressDestinationIds = new Set(forwardJobs.map((job) => job.destinationId));
+  // Destination IDs with an in-flight forward *from this chat* — drives the
+  // "Forwarding…" badge in the modal. Scoped to source so the badge stays
+  // meaningful when jobs from other chats coexist in the global state.
+  const inProgressDestinationIds = useMemo(
+    () =>
+      new Set(
+        allForwardJobs
+          .filter((job) => job.sourceId === groupId)
+          .map((job) => job.destinationId),
+      ),
+    [allForwardJobs, groupId],
+  );
+  // Hide the inline-displayed job's floating card while the modal shows it.
+  // When this component unmounts (or the modal closes), the floating card
+  // re-appears via the cleanup so the user keeps seeing live progress.
+  useEffect(() => {
+    if (!forwardModalOpen || !activeForwardJobId) return;
+    suppressFloating(activeForwardJobId, true);
+    return () => suppressFloating(activeForwardJobId, false);
+  }, [forwardModalOpen, activeForwardJobId, suppressFloating]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [leaveConfirming, setLeaveConfirming] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -748,252 +730,31 @@ export default function GroupMedia({
     }));
   }
 
-  function handleCancelForward(jobId: string) {
-    forwardControllersRef.current.get(jobId)?.abort();
-  }
-
-  async function handleForwardToDestination(destinationId: string) {
+  function handleForwardToDestination(destinationId: string) {
     if (selectedCount === 0) return;
-    setForwardError(null);
 
-    // Duplicate-guard: if there's already an in-flight job to this destination
-    // with the exact same message selection, surface that job inline instead
-    // of spawning another. User doesn't lose their place — they see live progress.
     const messageIds = selectedItems.map((item) => item.id);
-    const messageIdsKey = makeMessageIdsKey(messageIds);
-    const existingJob = forwardJobs.find(
-      (job) => job.destinationId === destinationId && job.messageIdsKey === messageIdsKey,
-    );
-    if (existingJob) {
-      setActiveForwardJobId(existingJob.id);
-      return;
-    }
-
-    const jobId =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `fwd_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-    const totalMessages = selectedItems.length;
     const destinationChat = destinationChats.find((chat) => chat.id === destinationId);
-    const destinationTitle = destinationChat?.title;
-    const destinationIsChannel = destinationChat?.isChannel === true;
-    // Build a content summary so the user can see *what* is being forwarded
-    // — useful when several jobs run concurrently to the same destination.
     const contentSummary = describeForwardContent(selectedItems);
     const contentThumbBase64 = selectedItems[0]?.thumbBase64 || undefined;
-    // Helper: merge the destination identity + content summary into every
-    // progress snapshot so the UI can show "→ <Group Name>" + what is being
-    // forwarded alongside the step label.
-    const withDestination = (p: ForwardProgress): ForwardProgress => ({
-      ...p,
-      destinationTitle,
-      destinationIsChannel,
-      sourceTitle: groupTitle,
+
+    const jobId = startForward({
+      session,
+      fromGroupId: groupId,
+      fromGroupTitle: groupTitle,
+      toGroupId: destinationId,
+      destinationTitle: destinationChat?.title,
+      destinationIsChannel: destinationChat?.isChannel === true,
+      messageIds,
       contentSummary,
       contentThumbBase64,
     });
-    // Update this job's progress in the jobs array. Other in-flight jobs are
-    // unaffected — each fetch loop owns exactly one slot, identified by jobId.
-    const updateProgress = (
-      next: ForwardProgress | ((prev: ForwardProgress) => ForwardProgress),
-    ) => {
-      setForwardJobs((jobs) =>
-        jobs.map((job) =>
-          job.id === jobId
-            ? {
-                ...job,
-                progress:
-                  typeof next === "function"
-                    ? withDestination((next as (p: ForwardProgress) => ForwardProgress)(job.progress))
-                    : withDestination(next),
-              }
-            : job,
-        ),
-      );
-    };
-
-    const ac = new AbortController();
-    forwardControllersRef.current.set(jobId, ac);
-
-    const initialProgress: ForwardProgress = withDestination({
-      total: totalMessages,
-      index: 0,
-      step: "forwarding",
-      percent: 0,
-    });
-    setForwardJobs((jobs) => [
-      ...jobs,
-      { id: jobId, progress: initialProgress, destinationId, messageIdsKey },
-    ]);
     setActiveForwardJobId(jobId);
     // Clear the active selection now that the request is queued — lets the
     // user start a *different* selection + forward without disturbing this job.
     clearSelection();
-
-    let errorMessage: string | null = null;
-    let success = false;
-    let uploadedCount = 0;
-
-    try {
-      const response = await fetch("/api/telegram/forward", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionString: session,
-          fromGroupId: groupId,
-          toGroupId: destinationId,
-          messageIds,
-        }),
-        signal: ac.signal,
-      });
-
-      if (!response.ok || !response.body) {
-        let serverError: string | undefined;
-        try {
-          const json = await response.json();
-          serverError = json?.error;
-        } catch {
-          // ignore JSON parse failures
-        }
-        throw new Error(serverError || `Forward failed (HTTP ${response.status})`);
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let nl: number;
-        while ((nl = buf.indexOf("\n")) !== -1) {
-          const line = buf.slice(0, nl).trim();
-          buf = buf.slice(nl + 1);
-          if (!line) continue;
-          let event: ForwardEvent;
-          try {
-            event = JSON.parse(line) as ForwardEvent;
-          } catch {
-            continue;
-          }
-          switch (event.type) {
-            case "start":
-              updateProgress({
-                total: event.total,
-                index: 0,
-                step: "forwarding",
-                percent: 0,
-              });
-              break;
-            case "forwarding":
-              updateProgress((prev) => ({
-                total: prev.total,
-                index: 0,
-                step: "forwarding",
-                percent: 0,
-              }));
-              break;
-            case "message_start":
-              updateProgress({
-                total: totalMessages,
-                index: event.index,
-                step: "downloading",
-                percent: 0,
-                loadedBytes: 0,
-                totalBytes: event.size ?? undefined,
-              });
-              break;
-            case "download_progress": {
-              const pct = event.total > 0 ? (event.loaded / event.total) * 100 : 0;
-              updateProgress({
-                total: totalMessages,
-                index: event.index,
-                step: "downloading",
-                percent: pct,
-                loadedBytes: event.loaded,
-                totalBytes: event.total,
-              });
-              break;
-            }
-            case "download_done":
-              updateProgress((prev) => ({
-                total: prev.total,
-                index: event.index,
-                step: "uploading",
-                percent: 0,
-              }));
-              break;
-            case "upload_progress":
-              updateProgress({
-                total: totalMessages,
-                index: event.index,
-                step: "uploading",
-                percent: event.progress * 100,
-              });
-              break;
-            case "upload_done":
-              uploadedCount += 1;
-              updateProgress({
-                total: totalMessages,
-                index: event.index,
-                step: "uploading",
-                percent: 100,
-              });
-              break;
-            case "message_skipped":
-              updateProgress({
-                total: totalMessages,
-                index: event.index,
-                step: "skipped",
-                percent: 100,
-              });
-              break;
-            case "done":
-              success = true;
-              break;
-            case "error":
-              errorMessage = event.message;
-              break;
-          }
-        }
-      }
-
-      if (errorMessage) throw new Error(errorMessage);
-      if (!success) throw new Error("Forward ended without confirmation");
-
-      setForwardSuccess(
-        `Forwarded ${totalMessages} item${totalMessages === 1 ? "" : "s"} to ${
-          destinationTitle ?? "the selected chat"
-        }.`,
-      );
-    } catch (error: unknown) {
-      const isAbort =
-        ac.signal.aborted ||
-        (error instanceof DOMException && error.name === "AbortError") ||
-        (error instanceof Error && error.name === "AbortError");
-      if (isAbort) {
-        setForwardSuccess(
-          uploadedCount > 0
-            ? `Forward cancelled. ${uploadedCount} item${uploadedCount === 1 ? "" : "s"} already sent to ${destinationTitle ?? "the destination"}.`
-            : "Forward cancelled.",
-        );
-      } else {
-        setForwardError(error instanceof Error ? error.message : "Failed to forward messages");
-      }
-    } finally {
-      forwardControllersRef.current.delete(jobId);
-      setForwardJobs((jobs) => jobs.filter((job) => job.id !== jobId));
-      // If this was the inline-displayed job, clear so a new forward starts fresh.
-      setActiveForwardJobId((current) => (current === jobId ? null : current));
-    }
   }
 
-  useEffect(() => {
-    if (!forwardSuccess) return;
-    const timeout = window.setTimeout(() => setForwardSuccess(null), 4000);
-    return () => window.clearTimeout(timeout);
-  }, [forwardSuccess]);
 
   function openLinksModal() {
     if (selectedItems.length === 0) return;
@@ -1145,7 +906,6 @@ export default function GroupMedia({
       <button
         type="button"
         onClick={() => {
-          setForwardError(null);
           setForwardModalOpen(true);
         }}
         disabled={selectedCount === 0 || availableForwardDestinations.length === 0}
@@ -1253,12 +1013,6 @@ export default function GroupMedia({
         </div>
         {selectionToolbar}
 
-        {forwardSuccess && (
-          <div className="mx-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
-            {forwardSuccess}
-          </div>
-        )}
-
         {albumCaptions.length > 0 && (
           <div className="border-b border-zinc-200 bg-zinc-50/60 px-3 py-3 sm:px-6 dark:border-zinc-800 dark:bg-zinc-900/40">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -1363,6 +1117,15 @@ export default function GroupMedia({
             }}
             items={albumItems}
             onSelectItem={setViewer}
+            onForward={
+              availableForwardDestinations.length > 0
+                ? () => {
+                    setSelectedIds(new Set([viewer.id]));
+                    setForwardModalOpen(true);
+                    setViewer(null);
+                  }
+                : undefined
+            }
           />
         )}
 
@@ -1378,7 +1141,6 @@ export default function GroupMedia({
             destinations={availableForwardDestinations}
             currentChatId={groupId}
             loading={false}
-            error={forwardError}
             isRestricted={isSelectedRestricted}
             progress={activeInlineJob?.progress ?? null}
             onClose={() => {
@@ -1386,20 +1148,9 @@ export default function GroupMedia({
               setActiveForwardJobId(null);
             }}
             onSelectDestination={handleForwardToDestination}
-            onCancel={activeInlineJob ? () => handleCancelForward(activeInlineJob.id) : undefined}
+            onCancel={activeInlineJob ? () => cancelForward(activeInlineJob.id) : undefined}
             inProgressDestinationIds={inProgressDestinationIds}
           />
-        )}
-        {floatingJobs.length > 0 && (
-          <div className="fixed bottom-4 right-4 z-40 flex max-h-[80vh] w-80 max-w-[calc(100vw-2rem)] flex-col gap-3 overflow-y-auto pr-1">
-            {[...floatingJobs].reverse().map((job) => (
-              <FloatingForwardProgress
-                key={job.id}
-                progress={job.progress}
-                onCancel={() => handleCancelForward(job.id)}
-              />
-            ))}
-          </div>
         )}
       </div>
     );
@@ -1523,12 +1274,6 @@ export default function GroupMedia({
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {forwardSuccess && (
-        <div className="mx-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
-          {forwardSuccess}
         </div>
       )}
 
@@ -1907,6 +1652,15 @@ export default function GroupMedia({
           fileName={viewer.fileName}
           caption={viewer.caption}
           onClose={() => setViewer(null)}
+          onForward={
+            availableForwardDestinations.length > 0
+              ? () => {
+                  setSelectedIds(new Set([viewer.id]));
+                  setForwardModalOpen(true);
+                  setViewer(null);
+                }
+              : undefined
+          }
         />
       )}
 
@@ -1921,7 +1675,6 @@ export default function GroupMedia({
           destinations={availableForwardDestinations}
           currentChatId={groupId}
           loading={false}
-          error={forwardError}
           session={session}
           isRestricted={isSelectedRestricted}
           progress={activeInlineJob?.progress ?? null}
@@ -1930,20 +1683,9 @@ export default function GroupMedia({
             setActiveForwardJobId(null);
           }}
           onSelectDestination={handleForwardToDestination}
-          onCancel={activeInlineJob ? () => handleCancelForward(activeInlineJob.id) : undefined}
+          onCancel={activeInlineJob ? () => cancelForward(activeInlineJob.id) : undefined}
           inProgressDestinationIds={inProgressDestinationIds}
         />
-      )}
-      {floatingJobs.length > 0 && (
-        <div className="fixed bottom-4 right-4 z-40 flex max-h-[80vh] w-80 max-w-[calc(100vw-2rem)] flex-col gap-3 overflow-y-auto pr-1">
-          {[...floatingJobs].reverse().map((job) => (
-            <FloatingForwardProgress
-              key={job.id}
-              progress={job.progress}
-              onCancel={() => handleCancelForward(job.id)}
-            />
-          ))}
-        </div>
       )}
 
       {/* Message search panel */}

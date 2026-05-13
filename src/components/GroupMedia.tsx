@@ -93,6 +93,47 @@ type VideoLayout = "landscape" | "portrait";
 
 const VIDEO_LAYOUT_STORAGE_KEY = "telegram-media-video-layout";
 const ALBUM_LAYOUT_STORAGE_KEY = "telegram-media-album-layout";
+const MEDIA_TAB_STORAGE_KEY = "telegram-media-tab";
+const MEDIA_SCROLL_STORAGE_KEY_PREFIX = "telegram-media-scroll-";
+const VALID_MEDIA_TABS = ["all", "photo", "video", "file"] as const;
+
+function readStoredMediaTab(): TabId {
+  if (typeof window === "undefined") return "all";
+  try {
+    const stored = window.localStorage.getItem(MEDIA_TAB_STORAGE_KEY);
+    if (stored && (VALID_MEDIA_TABS as readonly string[]).includes(stored)) {
+      return stored as TabId;
+    }
+  } catch {
+    // ignore
+  }
+  return "all";
+}
+
+type StoredMediaScroll = { y: number; count: number };
+
+function readStoredMediaScroll(groupId: string): StoredMediaScroll {
+  if (typeof window === "undefined") return { y: 0, count: 0 };
+  try {
+    const raw = window.localStorage.getItem(
+      MEDIA_SCROLL_STORAGE_KEY_PREFIX + groupId,
+    );
+    if (!raw) return { y: 0, count: 0 };
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      Number.isFinite(parsed.y) &&
+      Number.isFinite(parsed.count) &&
+      parsed.y >= 0 &&
+      parsed.count >= 0
+    ) {
+      return { y: parsed.y, count: parsed.count };
+    }
+  } catch {
+    // ignore
+  }
+  return { y: 0, count: 0 };
+}
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   {
@@ -477,7 +518,15 @@ export default function GroupMedia({
   const nextOffsetId = cache?.nextOffsetId ?? 0;
   const [loading, setLoading] = useState(cache === undefined);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [tab, setTab] = useState<TabId>("all");
+  const [tab, setTab] = useState<TabId>(readStoredMediaTab);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MEDIA_TAB_STORAGE_KEY, tab);
+    } catch {
+      // ignore
+    }
+  }, [tab]);
   const [videoLayout, setVideoLayout] = useState<VideoLayout>(() =>
     readStoredLayout(VIDEO_LAYOUT_STORAGE_KEY, "portrait")
   );
@@ -571,6 +620,19 @@ export default function GroupMedia({
       scrollContainerRef.current.scrollTop = savedScrollRef.current;
     }
   }, [albumView]);
+
+  // ── Cross-refresh scroll persistence (per-group) ───────────────────────
+  // Saves the grid's scrollTop to localStorage on every scroll, and restores
+  // it once the media has loaded enough to scroll to. Keyed by groupId so
+  // each chat keeps its own scroll memory; visiting a different chat doesn't
+  // clobber the saved value.
+  const persistScrollRestoredRef = useRef(false);
+  const persistScrollTargetRef = useRef<StoredMediaScroll>(
+    readStoredMediaScroll(groupId),
+  );
+  // Holds the current item count for the scroll listener to snapshot. Updated
+  // by a separate effect so the listener stays stable across renders.
+  const currentItemCountRef = useRef(0);
 
   function openItem(item: MediaItem) {
     if (selectionMode) {
@@ -693,6 +755,76 @@ export default function GroupMedia({
   const videos = filtered.filter((m) => m.type === "video");
   const files = filtered.filter((m) => m.type === "file");
   const allMediaItems = flattenMedia(media);
+
+  // Keep the scroll-save listener's view of "current count" up to date.
+  useEffect(() => {
+    currentItemCountRef.current = allMediaItems.length;
+  }, [allMediaItems.length]);
+
+  // Attach the scroll listener once per groupId. Saves both scrollY and the
+  // number of items loaded at that moment so we can re-hydrate the same view
+  // on refresh (by loading more pages until reaching that item count).
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    let queued = false;
+    function onScroll() {
+      if (!persistScrollRestoredRef.current) return;
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        if (!el) return;
+        try {
+          const value: StoredMediaScroll = {
+            y: el.scrollTop,
+            count: currentItemCountRef.current,
+          };
+          window.localStorage.setItem(
+            MEDIA_SCROLL_STORAGE_KEY_PREFIX + groupId,
+            JSON.stringify(value),
+          );
+        } catch {
+          // ignore
+        }
+      });
+    }
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [groupId]);
+
+  // Restore cross-refresh scroll. If the saved view had more items loaded
+  // than we currently have, chain "load more" requests until we catch up,
+  // then set scrollTop. The browser would otherwise clamp the scroll to the
+  // current content height — landing the user far short of where they were.
+  useEffect(() => {
+    if (persistScrollRestoredRef.current) return;
+    if (loading || loadingMore) return;
+    if (albumView) return;
+    const target = persistScrollTargetRef.current;
+    if (target.y <= 0 && target.count <= 0) {
+      persistScrollRestoredRef.current = true; // nothing to restore
+      return;
+    }
+    if (allMediaItems.length === 0) return; // wait for initial load
+    if (allMediaItems.length < target.count && hasMore) {
+      // Need more items to reach the saved position. Trigger another page
+      // load; this effect re-runs once the new items arrive.
+      void fetchMedia(nextOffsetId, false);
+      return;
+    }
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.scrollTop = target.y;
+      persistScrollRestoredRef.current = true;
+    });
+    // fetchMedia is stable enough in practice — including it would cause
+    // infinite re-runs since it's recreated on every render. The effect is
+    // self-terminating via persistScrollRestoredRef.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, loadingMore, albumView, allMediaItems.length, hasMore, nextOffsetId]);
   const selectedItems = allMediaItems.filter((item) => selectedIds.has(item.id));
   const selectedCount = selectedItems.length;
   /** True if any selected item is from a noforwards-restricted chat. */

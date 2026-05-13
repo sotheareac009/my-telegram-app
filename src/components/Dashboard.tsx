@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Header from "./Header";
 import Sidebar from "./Sidebar";
 import GroupsGrid, {
@@ -10,6 +10,94 @@ import GroupsGrid, {
 } from "./GroupsGrid";
 import GroupMedia, { type MediaCacheEntry } from "./GroupMedia";
 import Breadcrumb, { type BreadcrumbItem } from "./Breadcrumb";
+
+const ACTIVE_MENU_STORAGE_KEY = "telegram-active-menu";
+const ACTIVE_FOLDER_STORAGE_KEY = "telegram-active-folder";
+const PAGE_STORAGE_KEY = "telegram-page";
+const SCROLL_STORAGE_KEY = "telegram-scroll";
+const SELECTED_GROUP_STORAGE_KEY = "telegram-selected-group";
+const VALID_MENUS = ["home", "groups", "channels"] as const;
+
+function readStoredSelectedGroup(): GroupInfo | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(SELECTED_GROUP_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed.id === "string" &&
+      typeof parsed.title === "string"
+    ) {
+      return { id: parsed.id, title: parsed.title };
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function readStoredActiveMenu(): string {
+  if (typeof window === "undefined") return "home";
+  try {
+    const stored = window.localStorage.getItem(ACTIVE_MENU_STORAGE_KEY);
+    if (stored && (VALID_MENUS as readonly string[]).includes(stored)) {
+      return stored;
+    }
+  } catch {
+    // localStorage may throw in privacy modes — fall through to default
+  }
+  return "home";
+}
+
+type FolderByType = { groups: string; channels: string };
+type PageByType = { groups: number; channels: number };
+
+function readStoredJSON<T>(key: string, fallback: T, validate: (v: unknown) => v is T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    if (validate(parsed)) return parsed;
+  } catch {
+    // malformed JSON or storage unavailable
+  }
+  return fallback;
+}
+
+function isFolderByType(v: unknown): v is FolderByType {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    typeof (v as FolderByType).groups === "string" &&
+    typeof (v as FolderByType).channels === "string"
+  );
+}
+
+function isPageByType(v: unknown): v is PageByType {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    Number.isFinite((v as PageByType).groups) &&
+    Number.isFinite((v as PageByType).channels) &&
+    (v as PageByType).groups >= 1 &&
+    (v as PageByType).channels >= 1
+  );
+}
+
+function readStoredScroll(): number {
+  if (typeof window === "undefined") return 0;
+  try {
+    const raw = window.localStorage.getItem(SCROLL_STORAGE_KEY);
+    if (!raw) return 0;
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0) return n;
+  } catch {
+    // ignore
+  }
+  return 0;
+}
 
 interface UserInfo {
   id: string;
@@ -45,22 +133,125 @@ export default function Dashboard({
   onSignOut,
 }: DashboardProps) {
   const [collapsed, setCollapsed] = useState(false);
-  const [activeMenu, setActiveMenu] = useState("home");
-  const [selectedGroup, setSelectedGroup] = useState<GroupInfo | null>(null);
+  const [activeMenu, setActiveMenu] = useState<string>(readStoredActiveMenu);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(ACTIVE_MENU_STORAGE_KEY, activeMenu);
+    } catch {
+      // localStorage may throw in privacy modes — ignore
+    }
+  }, [activeMenu]);
+  const [selectedGroup, setSelectedGroup] = useState<GroupInfo | null>(
+    readStoredSelectedGroup,
+  );
+
+  useEffect(() => {
+    try {
+      if (selectedGroup) {
+        window.localStorage.setItem(
+          SELECTED_GROUP_STORAGE_KEY,
+          JSON.stringify(selectedGroup),
+        );
+      } else {
+        window.localStorage.removeItem(SELECTED_GROUP_STORAGE_KEY);
+      }
+    } catch {
+      // ignore
+    }
+  }, [selectedGroup]);
   console.log("Rendering Dashboard with session:", session,user, accounts, currentAccountId);
-  const [activeFolderByType, setActiveFolderByType] = useState<{
-    groups: string;
-    channels: string;
-  }>({ groups: "all", channels: "all" });
-  const [pageByType, setPageByType] = useState<{
-    groups: number;
-    channels: number;
-  }>({ groups: 1, channels: 1 });
+  const [activeFolderByType, setActiveFolderByType] = useState<FolderByType>(() =>
+    readStoredJSON<FolderByType>(
+      ACTIVE_FOLDER_STORAGE_KEY,
+      { groups: "all", channels: "all" },
+      isFolderByType,
+    ),
+  );
+  const [pageByType, setPageByType] = useState<PageByType>(() =>
+    readStoredJSON<PageByType>(
+      PAGE_STORAGE_KEY,
+      { groups: 1, channels: 1 },
+      isPageByType,
+    ),
+  );
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        ACTIVE_FOLDER_STORAGE_KEY,
+        JSON.stringify(activeFolderByType),
+      );
+    } catch {
+      // ignore storage failures
+    }
+  }, [activeFolderByType]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PAGE_STORAGE_KEY, JSON.stringify(pageByType));
+    } catch {
+      // ignore storage failures
+    }
+  }, [pageByType]);
+
   const [groupsCache, setGroupsCache] = useState<Group[] | null>(null);
   const [foldersCache, setFoldersCache] = useState<ChatFolder[] | null>(null);
   const [mediaCache, setMediaCache] = useState<Record<string, MediaCacheEntry>>(
     {},
   );
+
+  // Scroll restoration for the main content area. Saves the inner scroll
+  // container's scrollTop on every scroll (frame-throttled), and restores it
+  // once the relevant view has rendered enough content to scroll to.
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const scrollRestoredRef = useRef(false);
+  const targetScrollRef = useRef<number>(readStoredScroll());
+
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    let queued = false;
+    function onScroll() {
+      // Skip writes until the initial restore has happened — otherwise the
+      // first browser-driven scroll (often 0) clobbers the saved position.
+      if (!scrollRestoredRef.current) return;
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        if (!el) return;
+        try {
+          window.localStorage.setItem(SCROLL_STORAGE_KEY, String(el.scrollTop));
+        } catch {
+          // ignore
+        }
+      });
+    }
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Restore scroll once: on Home, immediately; on a list view, after data
+  // loads so the document is tall enough to actually scroll to the target.
+  useEffect(() => {
+    if (scrollRestoredRef.current) return;
+    if (selectedGroup) return; // inside a specific group — different scope
+    const ready =
+      activeMenu === "home" ||
+      ((activeMenu === "groups" || activeMenu === "channels") &&
+        groupsCache !== null &&
+        foldersCache !== null);
+    if (!ready) return;
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    // Wait one frame so the new layout is committed before we scroll.
+    requestAnimationFrame(() => {
+      if (!el) return;
+      el.scrollTop = targetScrollRef.current;
+      scrollRestoredRef.current = true;
+    });
+  }, [activeMenu, selectedGroup, groupsCache, foldersCache]);
 
   console.log("Dashboard state:", {
     activeMenu,
@@ -86,6 +277,13 @@ export default function Dashboard({
   );
 
   function handleMenuChange(menu: string) {
+    // Manual nav clears the saved scroll so the next refresh starts at the
+    // top of whichever view the user lands on, not at a stale position.
+    try {
+      window.localStorage.removeItem(SCROLL_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
     setActiveMenu(menu);
     setSelectedGroup(null);
   }
@@ -120,6 +318,11 @@ export default function Dashboard({
     setGroupsCache(null);
     setFoldersCache(null);
     setMediaCache({});
+    try {
+      window.localStorage.removeItem(SCROLL_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
     onSwitchAccount(accountId);
   }
 
@@ -167,7 +370,7 @@ export default function Dashboard({
           )}
 
           {/* Content */}
-          <div className="flex-1 overflow-y-auto">
+          <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
             {/* Home */}
             {activeMenu === "home" && (
               <div className="flex min-h-full flex-col items-center justify-center p-6">

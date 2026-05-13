@@ -302,8 +302,8 @@ export default function Dashboard({
     setFoldersCache(folders);
   }, []);
   const handleMediaCacheUpdate = useCallback(
-    (groupId: string, entry: MediaCacheEntry) => {
-      setMediaCache((prev) => ({ ...prev, [groupId]: entry }));
+    (cacheKey: string, entry: MediaCacheEntry) => {
+      setMediaCache((prev) => ({ ...prev, [cacheKey]: entry }));
     },
     [],
   );
@@ -333,10 +333,13 @@ export default function Dashboard({
     setGroupsCache((prev) =>
       prev ? prev.filter((g) => g.id !== groupId) : prev
     );
-    // Also evict its media cache
+    // Also evict its media cache — entries are keyed by `${groupId}::${tab}`
+    // so we need to drop every tab variant for this chat.
     setMediaCache((prev) => {
-      const next = { ...prev };
-      delete next[groupId];
+      const next: Record<string, MediaCacheEntry> = {};
+      for (const [k, v] of Object.entries(prev)) {
+        if (!k.startsWith(`${groupId}::`) && k !== groupId) next[k] = v;
+      }
       return next;
     });
     // Navigate back to the groups/channels list
@@ -542,7 +545,7 @@ export default function Dashboard({
                   session={session}
                   groupId={selectedGroup.id}
                   groupTitle={selectedGroup.title}
-                  cache={mediaCache[selectedGroup.id]}
+                  mediaCache={mediaCache}
                   onCacheUpdate={handleMediaCacheUpdate}
                   destinationChats={groupsCache ?? []}
                   onLeave={() => handleLeaveGroup(selectedGroup.id)}

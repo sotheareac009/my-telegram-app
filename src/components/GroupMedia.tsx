@@ -81,11 +81,26 @@ interface GroupMediaProps {
   session: string;
   groupId: string;
   groupTitle: string;
-  cache: MediaCacheEntry | undefined;
-  onCacheUpdate: (groupId: string, entry: MediaCacheEntry) => void;
+  /**
+   * Full media cache map keyed by `${groupId}::${cacheTab}` where cacheTab is
+   * one of "all" | "photo" | "video" | "file". GroupMedia composes the key
+   * itself based on the current tab so server-filtered results stay isolated
+   * per tab — switching tabs doesn't clobber the other tabs' data.
+   */
+  mediaCache: Record<string, MediaCacheEntry>;
+  onCacheUpdate: (cacheKey: string, entry: MediaCacheEntry) => void;
   destinationChats?: ForwardDestination[];
   /** Called after successfully leaving the group/channel. */
   onLeave?: () => void;
+}
+
+/** "album" piggybacks on the "all" cache — that tab is purely a client-side filter. */
+function getCacheTab(tab: TabId): "all" | "photo" | "video" | "file" {
+  return tab === "album" ? "all" : tab;
+}
+
+function getCacheKey(groupId: string, tab: TabId): string {
+  return `${groupId}::${getCacheTab(tab)}`;
 }
 
 type TabId = "all" | "photo" | "video" | "file" | "album";
@@ -517,16 +532,19 @@ export default function GroupMedia({
   session,
   groupId,
   groupTitle,
-  cache,
+  mediaCache,
   onCacheUpdate,
   destinationChats = [],
   onLeave,
 }: GroupMediaProps) {
-  console.log("Rendering GroupMedia with props:", { groupTitle, cache, destinationChats });
-  const media = cache?.media ?? [];
-  const hasMore = cache?.hasMore ?? false;
-  const nextOffsetId = cache?.nextOffsetId ?? 0;
-  const [loading, setLoading] = useState(cache === undefined);
+  // tab's declared further down but needed for the initial cache lookup — read
+  // straight from storage here so the first render already has the right data
+  // when the cache is warm for that tab.
+  const initialTab = readStoredMediaTab();
+  const initialCacheKey = getCacheKey(groupId, initialTab);
+  const initialCache = mediaCache[initialCacheKey];
+  console.log("Rendering GroupMedia with props:", { groupTitle, destinationChats });
+  const [loading, setLoading] = useState(initialCache === undefined);
   const [loadingMore, setLoadingMore] = useState(false);
   const [tab, setTab] = useState<TabId>(readStoredMediaTab);
 
@@ -537,6 +555,16 @@ export default function GroupMedia({
       // ignore
     }
   }, [tab]);
+
+  // Derive the current tab's cache slice. "album" maps to "all" (it's a
+  // client-side filter over the unfiltered list); the other tabs each have
+  // their own server-filtered cache entry.
+  const cacheTab = getCacheTab(tab);
+  const cacheKey = getCacheKey(groupId, tab);
+  const cache = mediaCache[cacheKey];
+  const media = cache?.media ?? [];
+  const hasMore = cache?.hasMore ?? false;
+  const nextOffsetId = cache?.nextOffsetId ?? 0;
   const [videoLayout, setVideoLayout] = useState<VideoLayout>(() =>
     readStoredLayout(VIDEO_LAYOUT_STORAGE_KEY, "portrait")
   );
@@ -691,7 +719,7 @@ export default function GroupMedia({
     setIsSearchJumpView(false);
     fetchMedia(0, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, groupId]);
+  }, [session, cacheKey]);
 
   useEffect(() => {
     window.localStorage.setItem(VIDEO_LAYOUT_STORAGE_KEY, videoLayout);
@@ -732,6 +760,12 @@ export default function GroupMedia({
     if (reset) setLoading(true);
     else setLoadingMore(true);
 
+    // Snapshot the cache key at request time so an in-flight fetch can't
+    // write its result into a different tab's cache (e.g., user switched tabs
+    // while a load-more was running).
+    const fetchCacheKey = cacheKey;
+    const fetchFilter = cacheTab;
+
     try {
       const res = await fetch("/api/telegram/media", {
         method: "POST",
@@ -741,12 +775,13 @@ export default function GroupMedia({
           groupId,
           limit: 50,
           offsetId,
+          filter: fetchFilter,
         }),
       });
       const data = await res.json();
       if (data.media) {
-        const prevMedia = reset ? [] : media;
-        onCacheUpdate(groupId, {
+        const prevMedia = reset ? [] : mediaCache[fetchCacheKey]?.media ?? [];
+        onCacheUpdate(fetchCacheKey, {
           media: [...prevMedia, ...data.media],
           hasMore: data.hasMore,
           nextOffsetId: data.nextOffsetId,

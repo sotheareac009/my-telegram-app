@@ -158,6 +158,20 @@ function buildItem(msg: RawMessage): SingleMediaItem | null {
   };
 }
 
+/** Map the client-side filter token to a server-side MTProto messages filter. */
+function buildMessagesFilter(filter: string): Api.TypeMessagesFilter | undefined {
+  switch (filter) {
+    case "photo":
+      return new Api.InputMessagesFilterPhotos();
+    case "video":
+      return new Api.InputMessagesFilterVideo();
+    case "file":
+      return new Api.InputMessagesFilterDocument();
+    default:
+      return undefined; // "all" — no server-side filtering
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const {
@@ -165,6 +179,7 @@ export async function POST(request: Request) {
       groupId,
       limit = 50,
       offsetId = 0,
+      filter = "all",
     } = await request.json();
     if (!sessionString || !groupId) {
       return Response.json({ error: "Missing params" }, { status: 400 });
@@ -173,7 +188,12 @@ export async function POST(request: Request) {
     const client = createClient(sessionString);
     await client.connect();
 
-    const messages = await client.getMessages(groupId, { limit, offsetId });
+    const apiFilter = buildMessagesFilter(filter);
+    const messages = await client.getMessages(groupId, {
+      limit,
+      offsetId,
+      ...(apiFilter ? { filter: apiFilter } : {}),
+    });
 
     // If the last (oldest in this batch) message belongs to an album, keep
     // pulling until we exit that album so a single album never spans pages.
@@ -188,6 +208,7 @@ export async function POST(request: Request) {
           const more = await client.getMessages(groupId, {
             limit: 20,
             offsetId: extraOffsetId,
+            ...(apiFilter ? { filter: apiFilter } : {}),
           });
           if (more.length === 0) break;
           let foundBoundary = false;

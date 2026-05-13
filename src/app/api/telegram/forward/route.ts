@@ -224,6 +224,54 @@ async function downloadToTempFile(
  *  - File path string: GramJS calls fs.lstat → reads it natively, works
  *    for any size.
  */
+/** Telegram limit: a single album/grouped message can hold at most 10 items. */
+const ALBUM_CHUNK_SIZE = 10;
+
+/**
+ * Split a list of message IDs into batches that preserve original album
+ * grouping. Each batch is either:
+ *  - A single message ID (standalone, or only one item from an album was selected).
+ *  - A run of message IDs that share the same `groupedId` — these will be
+ *    re-uploaded as a Telegram album (max 10 per album, so longer runs are
+ *    split into multiple chunks).
+ *
+ * The result preserves the input order so the user sees items appear in the
+ * destination in the same sequence they had in the source chat.
+ */
+function groupMessagesByAlbum(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  messages: any[],
+): number[][] {
+  // Bucket messages by groupedId, preserving first-seen order across buckets.
+  // bucketOrder lists groupedId values (or null for standalones) in the order
+  // they first appear in `messages` — this drives output ordering.
+  const buckets = new Map<string, number[]>();
+  const bucketOrder: string[] = [];
+  for (const msg of messages) {
+    if (!msg) continue;
+    // groupedId may be a BigInt-like object; stringify safely.
+    const key = msg.groupedId ? `g:${msg.groupedId.toString()}` : `s:${msg.id}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, []);
+      bucketOrder.push(key);
+    }
+    buckets.get(key)!.push(msg.id as number);
+  }
+  const groups: number[][] = [];
+  for (const key of bucketOrder) {
+    const ids = buckets.get(key)!;
+    if (key.startsWith("s:") || ids.length === 1) {
+      groups.push([ids[0]]);
+    } else {
+      // Album run — split into ≤10-item chunks (Telegram's album limit).
+      for (let i = 0; i < ids.length; i += ALBUM_CHUNK_SIZE) {
+        groups.push(ids.slice(i, i + ALBUM_CHUNK_SIZE));
+      }
+    }
+  }
+  return groups;
+}
+
 async function resendAsNewMessages(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   client: any,
@@ -233,55 +281,233 @@ async function resendAsNewMessages(
   emit: ProgressEmitter,
   signal: AbortSignal
 ): Promise<void> {
-  for (let index = 0; index < messageIds.length; index++) {
-    // Stop early if the client (e.g., user closed the tab / reloaded). Each
-    // message is an independent server-side commit, so aborting between
-    // messages prevents the rest of the batch from being sent.
+  // Fetch all messages up-front so we can read their groupedId and preserve
+  // album grouping when re-uploading. One round-trip instead of N.
+  const allMessages = await client.getMessages(fromGroupId, { ids: messageIds });
+  const messageById = new Map<number, unknown>();
+  for (const msg of allMessages) {
+    if (msg) messageById.set(msg.id, msg);
+  }
+
+  const groups = groupMessagesByAlbum(allMessages);
+
+  let globalIndex = 0;
+  for (const group of groups) {
     throwIfAborted(signal);
 
-    const messageId = messageIds[index];
-    // Re-fetch to get the caption (message text) alongside media info
-    const [msgResult, fileResult] = await Promise.all([
-      client.getMessages(fromGroupId, { ids: [messageId] }),
-      downloadToTempFile(client, fromGroupId, messageId, index, emit, signal),
-    ]);
+    if (group.length === 1) {
+      await resendSingle(
+        client,
+        fromGroupId,
+        toGroupId,
+        group[0],
+        messageById.get(group[0]),
+        globalIndex,
+        emit,
+        signal,
+      );
+      globalIndex += 1;
+    } else {
+      await resendAsAlbum(
+        client,
+        toGroupId,
+        fromGroupId,
+        group,
+        group.map((id) => messageById.get(id)),
+        globalIndex,
+        emit,
+        signal,
+      );
+      globalIndex += group.length;
+    }
+  }
+}
 
-    if (!fileResult) {
-      console.warn(`[forward] message ${messageId} has no downloadable media — skipping`);
-      emit({ type: "message_skipped", messageId, index, reason: "no downloadable media" });
-      continue;
+/**
+ * Re-send a single message: download → upload via sendFile. Behavior identical
+ * to the original implementation (preserves attributes + thumb).
+ */
+async function resendSingle(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  client: any,
+  fromGroupId: string,
+  toGroupId: string,
+  messageId: number,
+  message: unknown,
+  index: number,
+  emit: ProgressEmitter,
+  signal: AbortSignal,
+): Promise<void> {
+  const fileResult = await downloadToTempFile(client, fromGroupId, messageId, index, emit, signal);
+  if (!fileResult) {
+    console.warn(`[forward] message ${messageId} has no downloadable media — skipping`);
+    emit({ type: "message_skipped", messageId, index, reason: "no downloadable media" });
+    return;
+  }
+  const caption: string =
+    (message as { message?: string } | undefined)?.message ?? "";
+
+  try {
+    await client.sendFile(toGroupId, {
+      file: fileResult.filePath,
+      caption,
+      forceDocument: false,
+      supportsStreaming: true,
+      attributes: fileResult.attributes.length > 0 ? fileResult.attributes : undefined,
+      thumb: fileResult.thumbPath ?? undefined,
+      progressCallback: (progress: number) => {
+        emit({ type: "upload_progress", messageId, index, progress });
+      },
+    });
+    emit({ type: "upload_done", messageId, index });
+  } finally {
+    await fsp.unlink(fileResult.filePath).catch((e) => {
+      console.warn(`[forward] failed to delete temp file ${fileResult.filePath}:`, e);
+    });
+    if (fileResult.thumbPath) {
+      await fsp.unlink(fileResult.thumbPath).catch((e) => {
+        console.warn(`[forward] failed to delete temp thumb ${fileResult.thumbPath}:`, e);
+      });
+    }
+  }
+}
+
+/**
+ * Re-send a run of messages that share a `groupedId` as a single Telegram
+ * album. Downloads each item sequentially (one temp file at a time in memory
+ * pressure terms — they live on disk), then issues one `sendFile(...)` call
+ * with parallel `file[]`, `caption[]`, and `attributes[]` arrays. GramJS
+ * dispatches that as `messages.SendMultiMedia`, which is the actual album RPC.
+ *
+ * Limitations:
+ *  - Per-item thumbnails aren't supported by GramJS for albums; we drop them
+ *    (photos don't need them; videos lose previews-before-play in the album).
+ *  - Album upload is sequential at the GramJS layer — `progressCallback` fires
+ *    per file and we use the "progress reset to 0" signal to advance which
+ *    item we're emitting events for.
+ */
+async function resendAsAlbum(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  client: any,
+  toGroupId: string,
+  fromGroupId: string,
+  messageIds: number[],
+  messages: unknown[],
+  startIndex: number,
+  emit: ProgressEmitter,
+  signal: AbortSignal,
+): Promise<void> {
+  type DownloadedItem = {
+    messageId: number;
+    index: number;
+    filePath: string;
+    thumbPath: string | null;
+    attributes: Api.TypeDocumentAttribute[];
+    caption: string;
+  };
+  const downloaded: DownloadedItem[] = [];
+
+  try {
+    // ── Phase 1: download every item in the album sequentially ──────────
+    for (let i = 0; i < messageIds.length; i++) {
+      throwIfAborted(signal);
+      const messageId = messageIds[i];
+      const index = startIndex + i;
+      const fileResult = await downloadToTempFile(
+        client,
+        fromGroupId,
+        messageId,
+        index,
+        emit,
+        signal,
+      );
+      if (!fileResult) {
+        console.warn(
+          `[forward] album message ${messageId} has no downloadable media — skipping`,
+        );
+        emit({
+          type: "message_skipped",
+          messageId,
+          index,
+          reason: "no downloadable media",
+        });
+        continue;
+      }
+      downloaded.push({
+        messageId,
+        index,
+        filePath: fileResult.filePath,
+        thumbPath: fileResult.thumbPath,
+        attributes: fileResult.attributes,
+        caption: (messages[i] as { message?: string } | undefined)?.message ?? "",
+      });
     }
 
-    const caption: string = msgResult[0]?.message ?? "";
+    if (downloaded.length === 0) return;
 
-    try {
-      // Pass the file path as a plain string — GramJS handles it natively
-      // via fs.lstat + fs.stat, correctly for any file size.
+    // If only one item survived (others were skipped) fall back to a single
+    // send — Telegram albums require ≥ 2 items.
+    if (downloaded.length === 1) {
+      const only = downloaded[0];
+      throwIfAborted(signal);
       await client.sendFile(toGroupId, {
-        file: fileResult.filePath,
-        caption,
+        file: only.filePath,
+        caption: only.caption,
         forceDocument: false,
         supportsStreaming: true,
-        // Preserve original document attributes (width/height/duration for videos,
-        // duration/title for audio, animated/sticker flags, etc.) so the resent
-        // media renders with the correct aspect ratio and metadata. Without this,
-        // GramJS would default video dimensions to 1×1 (no ffprobe in Node).
-        attributes: fileResult.attributes.length > 0 ? fileResult.attributes : undefined,
-        // Preserve the original thumbnail so previews render before playback.
-        thumb: fileResult.thumbPath ?? undefined,
+        attributes: only.attributes.length > 0 ? only.attributes : undefined,
+        thumb: only.thumbPath ?? undefined,
         progressCallback: (progress: number) => {
-          emit({ type: "upload_progress", messageId, index, progress });
+          emit({
+            type: "upload_progress",
+            messageId: only.messageId,
+            index: only.index,
+            progress,
+          });
         },
       });
-      emit({ type: "upload_done", messageId, index });
-    } finally {
-      // Always clean up the temp files
-      await fsp.unlink(fileResult.filePath).catch((e) => {
-        console.warn(`[forward] failed to delete temp file ${fileResult.filePath}:`, e);
+      emit({ type: "upload_done", messageId: only.messageId, index: only.index });
+      return;
+    }
+
+    // ── Phase 2: one sendFile() call uploads all items as an album ───────
+    throwIfAborted(signal);
+    let albumUploadIdx = 0;
+    let lastProgress = 0;
+    await client.sendFile(toGroupId, {
+      file: downloaded.map((d) => d.filePath),
+      caption: downloaded.map((d) => d.caption),
+      forceDocument: false,
+      supportsStreaming: true,
+      attributes: downloaded.map((d) => (d.attributes.length > 0 ? d.attributes : [])),
+      progressCallback: (progress: number) => {
+        // GramJS uploads album items sequentially; each new file starts at 0.
+        // A noticeable drop in `progress` is our signal that the next item began.
+        if (progress + 0.05 < lastProgress && albumUploadIdx < downloaded.length - 1) {
+          albumUploadIdx += 1;
+        }
+        lastProgress = progress;
+        const current = downloaded[albumUploadIdx];
+        emit({
+          type: "upload_progress",
+          messageId: current.messageId,
+          index: current.index,
+          progress,
+        });
+      },
+    });
+    for (const item of downloaded) {
+      emit({ type: "upload_done", messageId: item.messageId, index: item.index });
+    }
+  } finally {
+    // Clean up every temp file that made it onto disk, even on partial failure.
+    for (const item of downloaded) {
+      await fsp.unlink(item.filePath).catch((e) => {
+        console.warn(`[forward] failed to delete temp file ${item.filePath}:`, e);
       });
-      if (fileResult.thumbPath) {
-        await fsp.unlink(fileResult.thumbPath).catch((e) => {
-          console.warn(`[forward] failed to delete temp thumb ${fileResult.thumbPath}:`, e);
+      if (item.thumbPath) {
+        await fsp.unlink(item.thumbPath).catch((e) => {
+          console.warn(`[forward] failed to delete temp thumb ${item.thumbPath}:`, e);
         });
       }
     }

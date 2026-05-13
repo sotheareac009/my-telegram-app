@@ -1,10 +1,11 @@
 import { createClient } from "@/lib/telegram";
 import { buildMediaInfo } from "@/lib/telegram-media";
 import { Api } from "telegram";
+import { CustomFile } from "telegram/client/uploads";
 import bigInt from "big-integer";
 import { createWriteStream, promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { randomBytes } from "node:crypto";
 
 export const runtime = "nodejs";
@@ -131,6 +132,8 @@ async function downloadToTempFile(
   filePath: string;
   fileName: string;
   mimeType: string;
+  /** True when the source was a photo (MessageMediaPhoto). */
+  isPhoto: boolean;
   // Original document attributes (e.g. DocumentAttributeVideo with w/h/duration).
   // Preserved so the re-uploaded media keeps its aspect ratio — without these,
   // GramJS defaults video dimensions to 1×1 because Node has no ffprobe.
@@ -146,6 +149,7 @@ async function downloadToTempFile(
   const info = buildMediaInfo(msg.media as Api.TypeMessageMedia, messageId);
   if (!info) return null;
 
+  const isPhoto = msg.media instanceof Api.MessageMediaPhoto;
   let attributes: Api.TypeDocumentAttribute[] = [];
   let thumbPath: string | null = null;
   if (msg.media instanceof Api.MessageMediaDocument) {
@@ -208,7 +212,14 @@ async function downloadToTempFile(
     throw err;
   }
 
-  return { filePath: tmpPath, fileName: info.fileName, mimeType: info.mimeType, attributes, thumbPath };
+  return {
+    filePath: tmpPath,
+    fileName: info.fileName,
+    mimeType: info.mimeType,
+    isPhoto,
+    attributes,
+    thumbPath,
+  };
 }
 
 /**
@@ -379,12 +390,12 @@ async function resendSingle(
  * with parallel `file[]`, `caption[]`, and `attributes[]` arrays. GramJS
  * dispatches that as `messages.SendMultiMedia`, which is the actual album RPC.
  *
- * Limitations:
- *  - Per-item thumbnails aren't supported by GramJS for albums; we drop them
- *    (photos don't need them; videos lose previews-before-play in the album).
- *  - Album upload is sequential at the GramJS layer — `progressCallback` fires
- *    per file and we use the "progress reset to 0" signal to advance which
- *    item we're emitting events for.
+ * We bypass `client.sendFile` here because GramJS' `_sendAlbum` only accepts a
+ * single `thumb` for the whole album — applying it to all items or dropping it
+ * entirely. To preserve per-item video previews we drive the lower-level RPCs
+ * directly: upload each file and its own thumb via `uploadFile`, stabilize the
+ * upload through `messages.UploadMedia`, then commit the batch via
+ * `messages.SendMultiMedia`.
  */
 async function resendAsAlbum(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -401,6 +412,9 @@ async function resendAsAlbum(
     messageId: number;
     index: number;
     filePath: string;
+    fileName: string;
+    mimeType: string;
+    isPhoto: boolean;
     thumbPath: string | null;
     attributes: Api.TypeDocumentAttribute[];
     caption: string;
@@ -437,6 +451,9 @@ async function resendAsAlbum(
         messageId,
         index,
         filePath: fileResult.filePath,
+        fileName: fileResult.fileName,
+        mimeType: fileResult.mimeType,
+        isPhoto: fileResult.isPhoto,
         thumbPath: fileResult.thumbPath,
         attributes: fileResult.attributes,
         caption: (messages[i] as { message?: string } | undefined)?.message ?? "",
@@ -446,7 +463,8 @@ async function resendAsAlbum(
     if (downloaded.length === 0) return;
 
     // If only one item survived (others were skipped) fall back to a single
-    // send — Telegram albums require ≥ 2 items.
+    // send — Telegram albums require ≥ 2 items. sendFile handles the thumb
+    // correctly for single uploads, so no need for the manual path here.
     if (downloaded.length === 1) {
       const only = downloaded[0];
       throwIfAborted(signal);
@@ -470,32 +488,100 @@ async function resendAsAlbum(
       return;
     }
 
-    // ── Phase 2: one sendFile() call uploads all items as an album ───────
-    throwIfAborted(signal);
-    let albumUploadIdx = 0;
-    let lastProgress = 0;
-    await client.sendFile(toGroupId, {
-      file: downloaded.map((d) => d.filePath),
-      caption: downloaded.map((d) => d.caption),
-      forceDocument: false,
-      supportsStreaming: true,
-      attributes: downloaded.map((d) => (d.attributes.length > 0 ? d.attributes : [])),
-      progressCallback: (progress: number) => {
-        // GramJS uploads album items sequentially; each new file starts at 0.
-        // A noticeable drop in `progress` is our signal that the next item began.
-        if (progress + 0.05 < lastProgress && albumUploadIdx < downloaded.length - 1) {
-          albumUploadIdx += 1;
-        }
-        lastProgress = progress;
-        const current = downloaded[albumUploadIdx];
-        emit({
-          type: "upload_progress",
-          messageId: current.messageId,
-          index: current.index,
-          progress,
+    // ── Phase 2: build each item's media via the lower-level RPC chain ──
+    const inputEntity = await client.getInputEntity(toGroupId);
+    const albumItems: Api.InputSingleMedia[] = [];
+
+    for (const item of downloaded) {
+      throwIfAborted(signal);
+
+      // Upload the main file. uploadFile gates progress callbacks per file.
+      const fileStat = await fsp.stat(item.filePath);
+      const mainHandle = await client.uploadFile({
+        file: new CustomFile(item.fileName, fileStat.size, item.filePath),
+        workers: 1,
+        onProgress: (progress: number) => {
+          emit({
+            type: "upload_progress",
+            messageId: item.messageId,
+            index: item.index,
+            progress,
+          });
+        },
+      });
+
+      // Upload the thumb separately so we can reference it in the media item.
+      // Skipped for photos — Telegram generates photo thumbnails server-side.
+      let thumbHandle: Api.TypeInputFile | undefined;
+      if (item.thumbPath && !item.isPhoto) {
+        const thumbStat = await fsp.stat(item.thumbPath);
+        thumbHandle = await client.uploadFile({
+          file: new CustomFile(basename(item.thumbPath), thumbStat.size, item.thumbPath),
+          workers: 1,
         });
-      },
-    });
+      }
+
+      // Build the InputMedia for this item — photo or document — then stabilize
+      // via messages.UploadMedia to get a re-usable InputMediaDocument/Photo
+      // reference that SendMultiMedia accepts.
+      const uploadedMedia: Api.TypeInputMedia = item.isPhoto
+        ? new Api.InputMediaUploadedPhoto({ file: mainHandle })
+        : new Api.InputMediaUploadedDocument({
+            file: mainHandle,
+            mimeType: item.mimeType,
+            attributes: item.attributes,
+            thumb: thumbHandle,
+          });
+
+      const stabilized = await client.invoke(
+        new Api.messages.UploadMedia({ peer: inputEntity, media: uploadedMedia }),
+      );
+
+      let stableInputMedia: Api.TypeInputMedia = uploadedMedia;
+      if (stabilized instanceof Api.MessageMediaDocument) {
+        const doc = stabilized.document;
+        if (doc instanceof Api.Document) {
+          stableInputMedia = new Api.InputMediaDocument({
+            id: new Api.InputDocument({
+              id: doc.id,
+              accessHash: doc.accessHash,
+              fileReference: doc.fileReference,
+            }),
+          });
+        }
+      } else if (stabilized instanceof Api.MessageMediaPhoto) {
+        const photo = stabilized.photo;
+        if (photo instanceof Api.Photo) {
+          stableInputMedia = new Api.InputMediaPhoto({
+            id: new Api.InputPhoto({
+              id: photo.id,
+              accessHash: photo.accessHash,
+              fileReference: photo.fileReference,
+            }),
+          });
+        }
+      }
+
+      albumItems.push(
+        new Api.InputSingleMedia({
+          media: stableInputMedia,
+          message: item.caption,
+          randomId: bigInt.randBetween(
+            "-9223372036854775808",
+            "9223372036854775807",
+          ),
+          entities: [],
+        }),
+      );
+    }
+
+    throwIfAborted(signal);
+    await client.invoke(
+      new Api.messages.SendMultiMedia({
+        peer: inputEntity,
+        multiMedia: albumItems,
+      }),
+    );
     for (const item of downloaded) {
       emit({ type: "upload_done", messageId: item.messageId, index: item.index });
     }

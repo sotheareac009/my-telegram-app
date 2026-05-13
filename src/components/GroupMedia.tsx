@@ -613,12 +613,17 @@ export default function GroupMedia({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   /** Saves the Y offset before entering album view so we can restore it */
   const savedScrollRef = useRef<number>(0);
+  /** Tracks the previous albumView so we only restore on an exit transition. */
+  const prevAlbumViewRef = useRef<MediaItem | null>(null);
 
-  // Restore scroll position after returning from album view
+  // Restore scroll position after returning from album view. We explicitly
+  // guard on the transition (was-in-album → not-in-album) so this effect
+  // doesn't fire on initial mount and clobber the cross-refresh restore.
   useEffect(() => {
-    if (!albumView && scrollContainerRef.current) {
+    if (prevAlbumViewRef.current && !albumView && scrollContainerRef.current) {
       scrollContainerRef.current.scrollTop = savedScrollRef.current;
     }
+    prevAlbumViewRef.current = albumView;
   }, [albumView]);
 
   // ── Cross-refresh scroll persistence (per-group) ───────────────────────
@@ -633,6 +638,16 @@ export default function GroupMedia({
   // Holds the current item count for the scroll listener to snapshot. Updated
   // by a separate effect so the listener stays stable across renders.
   const currentItemCountRef = useRef(0);
+  // Three-state prompt machine for the "resume where you left off?" toast:
+  //  - "pending":  saved scroll exists; toast is showing, awaiting decision.
+  //  - "restoring": user accepted; the restore effect is allowed to run.
+  //  - "hidden":   no saved scroll, or user declined, or restore finished.
+  const [restorePrompt, setRestorePrompt] = useState<
+    "pending" | "restoring" | "hidden"
+  >(() => {
+    const t = readStoredMediaScroll(groupId);
+    return t.y > 0 || t.count > 0 ? "pending" : "hidden";
+  });
 
   function openItem(item: MediaItem) {
     if (selectionMode) {
@@ -775,11 +790,10 @@ export default function GroupMedia({
       requestAnimationFrame(() => {
         queued = false;
         if (!el) return;
+        const count = currentItemCountRef.current;
+        if (count === 0) return;
         try {
-          const value: StoredMediaScroll = {
-            y: el.scrollTop,
-            count: currentItemCountRef.current,
-          };
+          const value: StoredMediaScroll = { y: el.scrollTop, count };
           window.localStorage.setItem(
             MEDIA_SCROLL_STORAGE_KEY_PREFIX + groupId,
             JSON.stringify(value),
@@ -793,38 +807,117 @@ export default function GroupMedia({
     return () => el.removeEventListener("scroll", onScroll);
   }, [groupId]);
 
+  // Save right before the page unloads. `pagehide` is more reliable than
+  // `beforeunload` (mobile bfcache, throttled tabs) and is what we depend on
+  // to capture the user's position the instant they hit refresh. Without
+  // this, a per-scroll save can lag a frame behind the actual scrollTop.
+  useEffect(() => {
+    function saveNow() {
+      const el = scrollContainerRef.current;
+      if (!el) return;
+      // Only save once we've finished hydrating the previous view —
+      // otherwise we'd clobber the saved state with scrollTop=0 from an
+      // unfinished restore.
+      if (!persistScrollRestoredRef.current) return;
+      const count = currentItemCountRef.current;
+      if (count === 0) return;
+      try {
+        const value: StoredMediaScroll = { y: el.scrollTop, count };
+        window.localStorage.setItem(
+          MEDIA_SCROLL_STORAGE_KEY_PREFIX + groupId,
+          JSON.stringify(value),
+        );
+      } catch {
+        // ignore
+      }
+    }
+    window.addEventListener("pagehide", saveNow);
+    return () => {
+      // Cleanup fires on unmount (SPA nav away) as well as on groupId change.
+      // Save first so the user's position survives leaving this group.
+      saveNow();
+      window.removeEventListener("pagehide", saveNow);
+    };
+  }, [groupId]);
+
+  // Bounds the load-more chain during restore. Without a cap, a flaky fetch
+  // (returns 0 new items but hasMore stays true) could spin forever.
+  const restoreLoadAttemptsRef = useRef(0);
+  const RESTORE_MAX_LOAD_ATTEMPTS = 20;
+
   // Restore cross-refresh scroll. If the saved view had more items loaded
   // than we currently have, chain "load more" requests until we catch up,
   // then set scrollTop. The browser would otherwise clamp the scroll to the
   // current content height — landing the user far short of where they were.
   useEffect(() => {
     if (persistScrollRestoredRef.current) return;
+    // Wait for the user to accept the prompt before doing any restoration.
+    if (restorePrompt !== "restoring") return;
     if (loading || loadingMore) return;
     if (albumView) return;
     const target = persistScrollTargetRef.current;
     if (target.y <= 0 && target.count <= 0) {
       persistScrollRestoredRef.current = true; // nothing to restore
+      setRestorePrompt("hidden");
       return;
     }
     if (allMediaItems.length === 0) return; // wait for initial load
-    if (allMediaItems.length < target.count && hasMore) {
+    if (
+      allMediaItems.length < target.count &&
+      hasMore &&
+      restoreLoadAttemptsRef.current < RESTORE_MAX_LOAD_ATTEMPTS
+    ) {
       // Need more items to reach the saved position. Trigger another page
       // load; this effect re-runs once the new items arrive.
+      restoreLoadAttemptsRef.current += 1;
       void fetchMedia(nextOffsetId, false);
       return;
     }
     const el = scrollContainerRef.current;
     if (!el) return;
+    // Re-apply across two animation frames. The first frame sets the
+    // position; by the second, thumbnail placeholders have usually settled
+    // their final heights, so a re-apply catches any clamping that happened
+    // when the layout was still short.
     requestAnimationFrame(() => {
       if (!el) return;
       el.scrollTop = target.y;
-      persistScrollRestoredRef.current = true;
+      requestAnimationFrame(() => {
+        if (!el) return;
+        el.scrollTop = target.y;
+        persistScrollRestoredRef.current = true;
+        setRestorePrompt("hidden");
+      });
     });
     // fetchMedia is stable enough in practice — including it would cause
     // infinite re-runs since it's recreated on every render. The effect is
     // self-terminating via persistScrollRestoredRef.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, loadingMore, albumView, allMediaItems.length, hasMore, nextOffsetId]);
+  }, [
+    restorePrompt,
+    loading,
+    loadingMore,
+    albumView,
+    allMediaItems.length,
+    hasMore,
+    nextOffsetId,
+  ]);
+
+  function acceptScrollRestore() {
+    setRestorePrompt("restoring");
+  }
+
+  function declineScrollRestore() {
+    // User chose to start from the top — drop the saved value and resume
+    // normal save behavior so today's session creates a fresh checkpoint.
+    setRestorePrompt("hidden");
+    persistScrollRestoredRef.current = true;
+    try {
+      window.localStorage.removeItem(MEDIA_SCROLL_STORAGE_KEY_PREFIX + groupId);
+    } catch {
+      // ignore
+    }
+  }
   const selectedItems = allMediaItems.filter((item) => selectedIds.has(item.id));
   const selectedCount = selectedItems.length;
   /** True if any selected item is from a noforwards-restricted chat. */
@@ -1851,6 +1944,73 @@ export default function GroupMedia({
             }, 280);
           }}
         />
+      )}
+
+      {/* Resume-where-you-left-off prompt — only shown when we have a saved
+          scroll position from before the last refresh. Waits for the user's
+          decision so we don't surprise them with a long scroll jump. */}
+      {restorePrompt !== "hidden" && !loading && allMediaItems.length > 0 && (
+        <div className="pointer-events-none fixed bottom-6 left-1/2 z-40 -translate-x-1/2 px-4">
+          <div className="pointer-events-auto flex max-w-md items-center gap-3 rounded-2xl border border-zinc-200 bg-white px-4 py-3 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+            </div>
+            <div className="flex-1 text-sm">
+              <p className="font-medium text-zinc-900 dark:text-zinc-100">
+                {restorePrompt === "restoring"
+                  ? "Going back to where you were…"
+                  : "Continue where you left off?"}
+              </p>
+              {restorePrompt === "pending" && (
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Resume your last scroll position in this chat.
+                </p>
+              )}
+            </div>
+            {restorePrompt === "pending" ? (
+              <div className="flex shrink-0 gap-1.5">
+                <button
+                  type="button"
+                  onClick={declineScrollRestore}
+                  className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                >
+                  No
+                </button>
+                <button
+                  type="button"
+                  onClick={acceptScrollRestore}
+                  className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700"
+                >
+                  Yes
+                </button>
+              </div>
+            ) : (
+              <svg
+                className="h-4 w-4 shrink-0 animate-spin text-blue-600"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

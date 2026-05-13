@@ -88,14 +88,14 @@ interface GroupMediaProps {
   onLeave?: () => void;
 }
 
-type TabId = "all" | "photo" | "video" | "file";
+type TabId = "all" | "photo" | "video" | "file" | "album";
 type VideoLayout = "landscape" | "portrait";
 
 const VIDEO_LAYOUT_STORAGE_KEY = "telegram-media-video-layout";
 const ALBUM_LAYOUT_STORAGE_KEY = "telegram-media-album-layout";
 const MEDIA_TAB_STORAGE_KEY = "telegram-media-tab";
 const MEDIA_SCROLL_STORAGE_KEY_PREFIX = "telegram-media-scroll-";
-const VALID_MEDIA_TABS = ["all", "photo", "video", "file"] as const;
+const VALID_MEDIA_TABS = ["all", "photo", "video", "file", "album"] as const;
 
 function readStoredMediaTab(): TabId {
   if (typeof window === "undefined") return "all";
@@ -176,6 +176,16 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
         <polyline points="14 2 14 8 20 8" />
+      </svg>
+    ),
+  },
+  {
+    id: "album",
+    label: "Albums",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="14" height="14" rx="2" />
+        <path d="M7 7h14v14a2 2 0 0 1-2 2H7" />
       </svg>
     ),
   },
@@ -753,6 +763,10 @@ export default function GroupMedia({
   // For specific tabs, flatten albums so individual items show through.
   const filtered: MediaItem[] = (() => {
     if (tab === "all") return media;
+    // "album" keeps only items that came in as a Telegram album (grouped
+    // messages). Rendering then falls through to the same section split as
+    // the All tab so photos/videos/files inside albums stay visually grouped.
+    if (tab === "album") return media.filter((item) => item.album);
     const out: MediaItem[] = [];
     for (const item of media) {
       if (item.album) {
@@ -1089,7 +1103,7 @@ export default function GroupMedia({
     return n;
   }
 
-  const counts = {
+  const counts: Record<TabId, number> = {
     all: media.reduce(
       (n, m) => n + (m.album ? m.album.items.length : 1),
       0
@@ -1097,6 +1111,7 @@ export default function GroupMedia({
     photo: countByType("photo"),
     video: countByType("video"),
     file: countByType("file"),
+    album: media.reduce((n, m) => n + (m.album ? 1 : 0), 0),
   };
 
   const selectionToolbar = selectionMode && (
@@ -1586,9 +1601,9 @@ export default function GroupMedia({
         ) : (
           <div className="space-y-8">
             {/* Photos section */}
-            {(tab === "all" || tab === "photo") && photos.length > 0 && (
+            {(tab === "all" || tab === "album" || tab === "photo") && photos.length > 0 && (
               <section>
-                {tab === "all" && (
+                {(tab === "all" || tab === "album") && (
                   <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
@@ -1656,10 +1671,10 @@ export default function GroupMedia({
             )}
 
             {/* Videos section */}
-            {(tab === "all" || tab === "video") && videos.length > 0 && (
+            {(tab === "all" || tab === "album" || tab === "video") && videos.length > 0 && (
               <section>
                 <div className="mb-3 flex items-center justify-between gap-3">
-                  {tab === "all" ? (
+                  {tab === "all" || tab === "album" ? (
                     <h3 className="flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <polygon points="23 7 16 12 23 17 23 7" />
@@ -1766,9 +1781,9 @@ export default function GroupMedia({
             )}
 
             {/* Files section */}
-            {(tab === "all" || tab === "file") && files.length > 0 && (
+            {(tab === "all" || tab === "album" || tab === "file") && files.length > 0 && (
               <section>
-                {tab === "all" && (
+                {(tab === "all" || tab === "album") && (
                   <h3 className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />

@@ -232,6 +232,38 @@ export default function Dashboard({
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
+  // Proactively load groups + folders on mount. Without this, refreshing
+  // directly into a group view leaves groupsCache=null forever (because
+  // GroupsGrid — the component that normally fetches dialogs — is never
+  // rendered while selectedGroup is set), which leaves the forward
+  // destination list empty and disables the Forward button.
+  useEffect(() => {
+    if (!session) return;
+    if (groupsCache !== null && foldersCache !== null) return;
+    let cancelled = false;
+    async function run() {
+      try {
+        const res = await fetch("/api/telegram/dialogs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionString: session }),
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        setGroupsCache(data.groups ?? []);
+        setFoldersCache(data.folders ?? []);
+      } catch {
+        if (cancelled) return;
+        setGroupsCache([]);
+        setFoldersCache([]);
+      }
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [session, groupsCache, foldersCache]);
+
   // Restore scroll once: on Home, immediately; on a list view, after data
   // loads so the document is tall enough to actually scroll to the target.
   useEffect(() => {

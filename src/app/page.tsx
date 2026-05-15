@@ -263,7 +263,7 @@ export default function LandingPage() {
             {
               title: "Auto-archive new media",
               desc: "Pick a chat, set it and forget it. New photos and videos save to your private archive the moment they arrive.",
-              comingSoon: true,
+              comingSoon: false,
               icon: (
                 <>
                   <polyline points="21 8 21 21 3 21 3 8" />

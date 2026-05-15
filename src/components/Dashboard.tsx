@@ -11,6 +11,8 @@ import GroupsGrid, {
 import GroupMedia, { type MediaCacheEntry } from "./GroupMedia";
 import Breadcrumb, { type BreadcrumbItem } from "./Breadcrumb";
 import ForwardQueueDashboard from "./ForwardQueueDashboard";
+import MyContacts from "./MyContacts";
+import RecentChats from "./RecentChats";
 
 const ACTIVE_MENU_STORAGE_KEY = "telegram-active-menu";
 const ACTIVE_FOLDER_STORAGE_KEY = "telegram-active-folder";
@@ -557,6 +559,8 @@ export default function Dashboard({
               )}
 
             {activeMenu === "queue" && <ForwardQueueDashboard />}
+            {activeMenu === "recent-chats" && <RecentChats sessionString={session} />}
+            {activeMenu === "my-contacts" && <MyContacts sessionString={session} />}
           </div>
         </main>
       </div>

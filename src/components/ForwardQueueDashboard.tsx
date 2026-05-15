@@ -81,7 +81,7 @@ export default function ForwardQueueDashboard() {
         {activeCount > 0 && (
           <button
             onClick={() => setConfirmCancelAll(true)}
-            className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-900/60 dark:bg-zinc-900 dark:text-red-400 dark:hover:bg-red-950/40"
+            className="cursor-pointer rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 dark:border-red-900/60 dark:bg-zinc-900 dark:text-red-400 dark:hover:bg-red-950/40"
           >
             Cancel all
           </button>
@@ -318,7 +318,7 @@ function QueueRow({ progress, session, sourceId, firstMessageId, onCancel }: Que
           <button
             onClick={handleCancel}
             disabled={cancelling}
-            className="shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950/40"
+            className="cursor-pointer shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:text-red-400 dark:hover:bg-red-950/40"
           >
             {cancelling ? "Cancelling…" : "Cancel"}
           </button>

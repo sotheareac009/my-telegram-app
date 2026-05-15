@@ -44,9 +44,13 @@ export async function POST(request: Request) {
       const onEvent = (event: RegistryEvent) => send(event);
       const unsubscribe = subscribe(userKey, onEvent);
 
-      // Heartbeat every 20s to keep reverse proxies / browsers from dropping
-      // an idle connection. Empty-object event is harmless to the client.
-      const heartbeat = setInterval(() => send({ kind: "heartbeat" }), 20_000);
+      // Heartbeat every 8s — short enough to keep ahead of typical 15–30s
+      // idle timeouts in dev servers, browsers, and reverse proxies that
+      // would otherwise tear the connection down between progress bursts.
+      const heartbeat = setInterval(() => send({ kind: "heartbeat" }), 8_000);
+      // Fire one heartbeat immediately so headers + body flush right away
+      // and the client knows the connection is live.
+      send({ kind: "heartbeat" });
 
       const cleanup = () => {
         if (closed) return;

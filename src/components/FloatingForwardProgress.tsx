@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ForwardProgress } from "./ForwardModal";
 
 interface FloatingForwardProgressProps {
   progress: ForwardProgress;
   onCancel?: () => void;
+  /** Hide this card without cancelling the forward. */
+  onClose?: () => void;
 }
 
 function formatBytes(n: number): string {
@@ -20,12 +22,20 @@ function formatBytes(n: number): string {
   return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+/** Auto-hide the floating card this long after it first appears. The forward
+ * keeps running in the background — it just stops cluttering the screen. */
+const AUTO_HIDE_MS = 15_000;
+/** Fade-out duration before the card is actually removed. */
+const HIDE_ANIM_MS = 300;
+
 export default function FloatingForwardProgress({
   progress,
   onCancel,
+  onClose,
 }: FloatingForwardProgressProps) {
   const [cancelling, setCancelling] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
+  const [hiding, setHiding] = useState(false);
   useEffect(() => {
     // Reset the local state if progress changes (e.g., a new job starts).
     setCancelling(false);
@@ -33,6 +43,32 @@ export default function FloatingForwardProgress({
   useEffect(() => {
     setThumbBroken(false);
   }, [progress.contentThumbBase64]);
+
+  // beginHide plays the fade-out, then calls onClose once the animation is
+  // done so the parent unmounts the card. onClose is a fresh function each
+  // render, so it's held in a ref. Used by both the auto-hide timer and the
+  // X button. Hiding only suppresses the floating UI — the forward keeps
+  // running and stays visible in the Queue dashboard.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const beginHide = () => {
+    if (hideTimerRef.current) return; // already hiding
+    setHiding(true);
+    hideTimerRef.current = setTimeout(() => onCloseRef.current?.(), HIDE_ANIM_MS);
+  };
+  const beginHideRef = useRef(beginHide);
+  beginHideRef.current = beginHide;
+
+  // Auto-hide after AUTO_HIDE_MS. The card is keyed by job id, so this timer
+  // runs once from when the card first mounts.
+  useEffect(() => {
+    const t = setTimeout(() => beginHideRef.current(), AUTO_HIDE_MS);
+    return () => {
+      clearTimeout(t);
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    };
+  }, []);
 
   const stepLabel =
     progress.step === "forwarding"
@@ -73,7 +109,12 @@ export default function FloatingForwardProgress({
   };
 
   return (
-    <div className="w-80 max-w-[calc(100vw-2rem)] shrink-0 rounded-2xl border border-zinc-200 bg-white p-4 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
+    <div
+      className={`w-80 max-w-[calc(100vw-2rem)] shrink-0 rounded-2xl border border-zinc-200 bg-white p-4 shadow-2xl transition-all ease-out dark:border-zinc-800 dark:bg-zinc-900 ${
+        hiding ? "translate-x-4 opacity-0" : "translate-x-0 opacity-100"
+      }`}
+      style={{ transitionDuration: `${HIDE_ANIM_MS}ms` }}
+    >
       <div className="flex items-center justify-between gap-2">
         {progress.destinationTitle ? (
           <div className="flex min-w-0 items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300">
@@ -99,16 +140,32 @@ export default function FloatingForwardProgress({
             Forwarding…
           </p>
         )}
-        {onCancel && (
-          <button
-            type="button"
-            onClick={handleCancelClick}
-            disabled={cancelling}
-            className="shrink-0 rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-red-800 dark:hover:bg-red-950/40 dark:hover:text-red-300"
-          >
-            {cancelling ? "Cancelling…" : "Cancel"}
-          </button>
-        )}
+        <div className="flex shrink-0 items-center gap-1">
+          {onCancel && (
+            <button
+              type="button"
+              onClick={handleCancelClick}
+              disabled={cancelling}
+              className="shrink-0 rounded-md border border-zinc-300 bg-white px-2 py-1 text-[11px] font-semibold text-zinc-700 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:border-red-800 dark:hover:bg-red-950/40 dark:hover:text-red-300"
+            >
+              {cancelling ? "Cancelling…" : "Cancel"}
+            </button>
+          )}
+          {onClose && (
+            <button
+              type="button"
+              onClick={beginHide}
+              title="Hide card (forward keeps running)"
+              aria-label="Hide card"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
       {progress.contentSummary && (

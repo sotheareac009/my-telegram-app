@@ -371,6 +371,7 @@ export function ForwardJobsProvider({ children, session }: ProviderProps) {
               key={job.id}
               progress={job.progress}
               onCancel={() => cancelForward(job.id)}
+              onClose={() => suppressFloating(job.id, true)}
             />
           ))}
         </div>

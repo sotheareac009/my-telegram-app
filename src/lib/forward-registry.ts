@@ -206,6 +206,19 @@ export function cancelJob(jobId: string, userKey: string): boolean {
   return true;
 }
 
+/** Cancel every job belonging to a user. Used on logout. Returns how many
+ * jobs were signalled. */
+export function cancelAllJobs(userKey: string): number {
+  let count = 0;
+  for (const job of state.jobs.values()) {
+    if (job.userKey === userKey) {
+      job.controller.abort();
+      count++;
+    }
+  }
+  return count;
+}
+
 /** Snapshot of all jobs for a given user. */
 export function listJobs(userKey: string): ForwardJobMeta[] {
   const out: ForwardJobMeta[] = [];

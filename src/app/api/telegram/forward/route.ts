@@ -674,6 +674,9 @@ export async function POST(request: Request) {
   // background. Clients track progress via /api/telegram/forwards/stream.
   void (async () => {
     const emit: ProgressEmitter = (event) => recordProgress(jobId, event);
+    const startedAt = Date.now();
+    const elapsed = () => `${((Date.now() - startedAt) / 1000).toFixed(1)}s`;
+    console.info(`[forward] job ${jobId} worker started`);
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let client: any;
@@ -728,10 +731,11 @@ export async function POST(request: Request) {
       }
     } catch (error: unknown) {
       if (error instanceof ClientDisconnected || ac.signal.aborted) {
-        console.info(`[forward] job ${jobId} cancelled mid-operation`);
+        console.info(`[forward] job ${jobId} cancelled mid-operation at ${elapsed()}`);
         removeReason = "cancelled";
       } else {
         const message = error instanceof Error ? error.message : "Failed to forward messages";
+        console.error(`[forward] job ${jobId} failed at ${elapsed()}: ${message}`);
         emit({ type: "error", message });
         removeReason = "error";
         removeErrorMessage = message;
@@ -744,6 +748,9 @@ export async function POST(request: Request) {
           // ignore disconnect failures
         }
       }
+      console.info(
+        `[forward] job ${jobId} worker finished (${removeReason}) after ${elapsed()}`,
+      );
       removeJob(jobId, removeReason, removeErrorMessage);
     }
   })();

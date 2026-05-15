@@ -139,7 +139,6 @@ export default function GroupsGrid({
             />
           </div>
         </div>
-
         {/* Folder pills */}
         {visibleFolders.length > 0 && (
           <div className="mt-3 flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
@@ -153,7 +152,7 @@ export default function GroupsGrid({
                   key={folder.id}
                   type="button"
                   onClick={() => { onActiveFolderChange(folder.id); onPageChange(1); }}
-                  className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                  className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
                     isActive
                       ? "bg-blue-600 text-white shadow-sm shadow-blue-600/30"
                       : "border border-zinc-200 bg-white text-zinc-500 hover:border-zinc-300 hover:text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-300"
@@ -194,14 +193,14 @@ export default function GroupsGrid({
             <p className="mt-1 text-xs text-zinc-400">Try a different search term</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 cursor-pointer">
             {paginated.map((group, index) => {
               const globalIndex = (currentPage - 1) * perPage + index;
               return (
                 <button
                   key={group.id}
                   onClick={() => onGroupSelect({ id: group.id, title: group.title })}
-                  className="group relative flex flex-col items-center gap-3 rounded-2xl border border-zinc-200/80 bg-white p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg hover:shadow-blue-500/8 dark:border-zinc-800/80 dark:bg-zinc-900 dark:hover:border-blue-800"
+                  className="cursor-pointer group relative flex flex-col items-center gap-3 rounded-2xl border border-zinc-200/80 bg-white p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg hover:shadow-blue-500/8 dark:border-zinc-800/80 dark:bg-zinc-900 dark:hover:border-blue-800"
                 >
                   {/* Unread badge */}
                   {group.unreadCount > 0 && (

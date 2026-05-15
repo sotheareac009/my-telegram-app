@@ -10,13 +10,14 @@ import GroupsGrid, {
 } from "./GroupsGrid";
 import GroupMedia, { type MediaCacheEntry } from "./GroupMedia";
 import Breadcrumb, { type BreadcrumbItem } from "./Breadcrumb";
+import ForwardQueueDashboard from "./ForwardQueueDashboard";
 
 const ACTIVE_MENU_STORAGE_KEY = "telegram-active-menu";
 const ACTIVE_FOLDER_STORAGE_KEY = "telegram-active-folder";
 const PAGE_STORAGE_KEY = "telegram-page";
 const SCROLL_STORAGE_KEY = "telegram-scroll";
 const SELECTED_GROUP_STORAGE_KEY = "telegram-selected-group";
-const VALID_MENUS = ["home", "groups", "channels"] as const;
+const VALID_MENUS = ["home", "groups", "channels", "queue"] as const;
 
 function readStoredSelectedGroup(): GroupInfo | null {
   if (typeof window === "undefined") return null;
@@ -374,6 +375,9 @@ export default function Dashboard({
         items.push({ label });
       }
     }
+    if (activeMenu === "queue") {
+      items.push({ label: "Queue" });
+    }
     return items;
   }
 
@@ -551,6 +555,8 @@ export default function Dashboard({
                   onLeave={() => handleLeaveGroup(selectedGroup.id)}
                 />
               )}
+
+            {activeMenu === "queue" && <ForwardQueueDashboard />}
           </div>
         </main>
       </div>

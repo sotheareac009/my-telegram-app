@@ -16,8 +16,8 @@ export interface ForwardProgress {
   total: number;
   /** 0-based index of the current message. */
   index: number;
-  /** Current step. "forwarding" = trying native forward; rest = re-upload pipeline. */
-  step: "forwarding" | "downloading" | "uploading" | "skipped";
+  /** Current step. "forwarding" = trying native forward; "queued" = waiting for a download slot; rest = re-upload pipeline. */
+  step: "forwarding" | "queued" | "downloading" | "uploading" | "skipped";
   /** Percentage (0–100) of the current step. */
   percent: number;
   /** Bytes downloaded so far for the current message (downloading step only). */
@@ -212,6 +212,7 @@ export default function ForwardModal({
             <div className="flex items-center justify-between gap-3">
               <p className="min-w-0 truncate text-xs font-semibold text-zinc-900 dark:text-zinc-100">
                 {progress.step === "forwarding" && "Forwarding…"}
+                {progress.step === "queued" && "Queued — waiting for a slot…"}
                 {progress.step === "downloading" &&
                   `Downloading ${progress.index + 1} of ${progress.total}`}
                 {progress.step === "uploading" &&
@@ -220,9 +221,11 @@ export default function ForwardModal({
                   `Skipped ${progress.index + 1} of ${progress.total}`}
               </p>
               <p className="shrink-0 text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
-                {progress.step === "downloading" && progress.totalBytes
-                  ? `${formatBytes(progress.loadedBytes ?? 0)} / ${formatBytes(progress.totalBytes)}`
-                  : `${Math.round(progress.percent)}%`}
+                {progress.step === "queued"
+                  ? ""
+                  : progress.step === "downloading" && progress.totalBytes
+                    ? `${formatBytes(progress.loadedBytes ?? 0)} / ${formatBytes(progress.totalBytes)}`
+                    : `${Math.round(progress.percent)}%`}
               </p>
             </div>
             <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
@@ -232,11 +235,13 @@ export default function ForwardModal({
                     ? "bg-blue-500"
                     : progress.step === "uploading"
                       ? "bg-emerald-500"
-                      : "bg-zinc-400"
+                      : progress.step === "queued"
+                        ? "bg-amber-400"
+                        : "bg-zinc-400"
                 }`}
                 style={{
                   width:
-                    progress.step === "forwarding"
+                    progress.step === "forwarding" || progress.step === "queued"
                       ? "100%"
                       : `${Math.max(0, Math.min(100, progress.percent))}%`,
                 }}
@@ -245,6 +250,8 @@ export default function ForwardModal({
             <p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
               {progress.step === "forwarding" &&
                 "Trying native forward — falling back to re-upload if blocked."}
+              {progress.step === "queued" &&
+                "Other forwards are running. This one will start automatically."}
               {progress.step === "downloading" && "Fetching original media from source chat…"}
               {progress.step === "uploading" &&
                 (progress.destinationTitle

@@ -1,5 +1,7 @@
 "use client";
 
+import { useForwardJobs } from "./ForwardJobsContext";
+
 interface SidebarProps {
   activeMenu: string;
   onMenuChange: (menu: string) => void;
@@ -43,9 +45,25 @@ const menuItems = [
       </svg>
     ),
   },
+  {
+    id: "queue",
+    label: "Queue",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="8" y1="6" x2="21" y2="6" />
+        <line x1="8" y1="12" x2="21" y2="12" />
+        <line x1="8" y1="18" x2="21" y2="18" />
+        <line x1="3" y1="6" x2="3.01" y2="6" />
+        <line x1="3" y1="12" x2="3.01" y2="12" />
+        <line x1="3" y1="18" x2="3.01" y2="18" />
+      </svg>
+    ),
+  },
 ];
 
 export default function Sidebar({ activeMenu, onMenuChange, collapsed, onToggle }: SidebarProps) {
+  const { jobs } = useForwardJobs();
+  const queueCount = jobs.length;
   return (
     <>
       {/* Desktop sidebar */}
@@ -86,24 +104,35 @@ export default function Sidebar({ activeMenu, onMenuChange, collapsed, onToggle 
         <nav className="flex flex-1 flex-col gap-1 p-2">
           {menuItems.map((item) => {
             const isActive = activeMenu === item.id;
+            const badge = item.id === "queue" && queueCount > 0 ? queueCount : null;
             return (
               <button
                 key={item.id}
                 onClick={() => onMenuChange(item.id)}
                 title={collapsed ? item.label : undefined}
-                className={`group flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-all duration-150 ${
+                className={`group relative flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-left transition-all duration-150 ${
                   isActive
                     ? "bg-blue-50 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400"
                     : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800/60 dark:hover:text-zinc-200"
                 } ${collapsed ? "justify-center" : ""}`}
               >
-                <span className={`shrink-0 transition-colors ${isActive ? "text-blue-500 dark:text-blue-400" : "text-zinc-400 group-hover:text-zinc-600 dark:group-hover:text-zinc-300"}`}>
+                <span className={`relative shrink-0 transition-colors ${isActive ? "text-blue-500 dark:text-blue-400" : "text-zinc-400 group-hover:text-zinc-600 dark:group-hover:text-zinc-300"}`}>
                   {item.icon}
+                  {badge !== null && collapsed && (
+                    <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold text-white">
+                      {badge}
+                    </span>
+                  )}
                 </span>
                 {!collapsed && (
                   <span className="text-[13px] font-medium">{item.label}</span>
                 )}
-                {isActive && !collapsed && (
+                {badge !== null && !collapsed && (
+                  <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-white">
+                    {badge}
+                  </span>
+                )}
+                {isActive && !collapsed && badge === null && (
                   <span className="ml-auto h-1.5 w-1.5 rounded-full bg-blue-500" />
                 )}
               </button>
@@ -123,6 +152,7 @@ export default function Sidebar({ activeMenu, onMenuChange, collapsed, onToggle 
       <nav className="fixed inset-x-0 bottom-0 z-40 flex h-16 items-center justify-around border-t border-zinc-200/80 bg-white/95 backdrop-blur-xl md:hidden dark:border-zinc-800/80 dark:bg-zinc-950/95">
         {menuItems.map((item) => {
           const isActive = activeMenu === item.id;
+          const badge = item.id === "queue" && queueCount > 0 ? queueCount : null;
           return (
             <button
               key={item.id}
@@ -131,7 +161,14 @@ export default function Sidebar({ activeMenu, onMenuChange, collapsed, onToggle 
                 isActive ? "text-blue-600 dark:text-blue-400" : "text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
               }`}
             >
-              <span className={isActive ? "text-blue-500" : "text-zinc-400"}>{item.icon}</span>
+              <span className={`relative ${isActive ? "text-blue-500" : "text-zinc-400"}`}>
+                {item.icon}
+                {badge !== null && (
+                  <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[9px] font-bold text-white">
+                    {badge}
+                  </span>
+                )}
+              </span>
               <span className="text-[10px] font-semibold">{item.label}</span>
               {isActive && <span className="absolute bottom-1 h-1 w-1 rounded-full bg-blue-500" />}
             </button>

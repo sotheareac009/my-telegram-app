@@ -283,7 +283,7 @@ export default function Home() {
   // Dashboard
   if (step === "done" && user) {
     return (
-      <ForwardJobsProvider>
+      <ForwardJobsProvider session={sessionString}>
         <Dashboard
           key={currentAccountId || sessionString}
           user={user}

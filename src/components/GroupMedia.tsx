@@ -766,27 +766,45 @@ export default function GroupMedia({
     const fetchCacheKey = cacheKey;
     const fetchFilter = cacheTab;
 
+    // Pages where every message is text/poll/etc. come back with media=[] but
+    // hasMore=true and an advanced nextOffsetId. Without chaining, the user
+    // sees no visible change and has to click "Load more" again. Cap the
+    // chain so a truly sparse channel can't spin forever on a single click.
+    const MAX_CHAIN_ATTEMPTS = 5;
+
     try {
-      const res = await fetch("/api/telegram/media", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionString: session,
-          groupId,
-          limit: 50,
-          offsetId,
-          filter: fetchFilter,
-        }),
-      });
-      const data = await res.json();
-      if (data.media) {
-        const prevMedia = reset ? [] : mediaCache[fetchCacheKey]?.media ?? [];
-        onCacheUpdate(fetchCacheKey, {
-          media: [...prevMedia, ...data.media],
-          hasMore: data.hasMore,
-          nextOffsetId: data.nextOffsetId,
+      let currentOffset = offsetId;
+      const accumulated: MediaItem[] = [];
+      let lastHasMore = true;
+      let lastNextOffset = offsetId;
+
+      for (let attempt = 0; attempt < MAX_CHAIN_ATTEMPTS; attempt++) {
+        const res = await fetch("/api/telegram/media", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionString: session,
+            groupId,
+            limit: 50,
+            offsetId: currentOffset,
+            filter: fetchFilter,
+          }),
         });
+        const data = await res.json();
+        if (!data.media) break;
+        accumulated.push(...(data.media as MediaItem[]));
+        lastHasMore = Boolean(data.hasMore);
+        lastNextOffset = Number(data.nextOffsetId) || 0;
+        if (accumulated.length > 0 || !lastHasMore) break;
+        currentOffset = lastNextOffset;
       }
+
+      const prevMedia = reset ? [] : mediaCache[fetchCacheKey]?.media ?? [];
+      onCacheUpdate(fetchCacheKey, {
+        media: [...prevMedia, ...accumulated],
+        hasMore: lastHasMore,
+        nextOffsetId: lastNextOffset,
+      });
     } catch {
       // silently fail
     } finally {
@@ -1012,7 +1030,7 @@ export default function GroupMedia({
     const contentSummary = describeForwardContent(selectedItems);
     const contentThumbBase64 = selectedItems[0]?.thumbBase64 || undefined;
 
-    const jobId = startForward({
+    void startForward({
       session,
       fromGroupId: groupId,
       fromGroupTitle: groupTitle,
@@ -1022,8 +1040,9 @@ export default function GroupMedia({
       messageIds,
       contentSummary,
       contentThumbBase64,
+    }).then((jobId) => {
+      if (jobId) setActiveForwardJobId(jobId);
     });
-    setActiveForwardJobId(jobId);
     // Clear the active selection now that the request is queued — lets the
     // user start a *different* selection + forward without disturbing this job.
     clearSelection();

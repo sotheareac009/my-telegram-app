@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/telegram";
 import { buildMediaInfo } from "@/lib/telegram-media";
+import { acquireDownloadSlot } from "@/lib/download-queue";
 import bigInt from "big-integer";
 
 export const runtime = "nodejs";
@@ -44,8 +45,15 @@ async function streamMediaResponse(
   mode: "inline" | "attachment",
   rangeHeader: string | null
 ) {
+  const releaseSlot = await acquireDownloadSlot();
+
   const client = createClient(sessionString);
-  await client.connect();
+  try {
+    await client.connect();
+  } catch (err) {
+    releaseSlot();
+    throw err;
+  }
 
   let cleaned = false;
   const cleanup = async () => {
@@ -55,6 +63,8 @@ async function streamMediaResponse(
       await client.disconnect();
     } catch {
       // ignore
+    } finally {
+      releaseSlot();
     }
   };
 

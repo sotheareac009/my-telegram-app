@@ -37,19 +37,23 @@ export default function FloatingForwardProgress({
   const stepLabel =
     progress.step === "forwarding"
       ? "Forwarding…"
-      : progress.step === "downloading"
-        ? `Downloading ${progress.index + 1} of ${progress.total}`
-        : progress.step === "uploading"
-          ? `Uploading ${progress.index + 1} of ${progress.total}`
-          : `Skipped ${progress.index + 1} of ${progress.total}`;
+      : progress.step === "queued"
+        ? "Queued — waiting for a slot…"
+        : progress.step === "downloading"
+          ? `Downloading ${progress.index + 1} of ${progress.total}`
+          : progress.step === "uploading"
+            ? `Uploading ${progress.index + 1} of ${progress.total}`
+            : `Skipped ${progress.index + 1} of ${progress.total}`;
 
   const sideLabel =
-    progress.step === "downloading" && progress.totalBytes
-      ? `${formatBytes(progress.loadedBytes ?? 0)} / ${formatBytes(progress.totalBytes)}`
-      : `${Math.round(progress.percent)}%`;
+    progress.step === "queued"
+      ? ""
+      : progress.step === "downloading" && progress.totalBytes
+        ? `${formatBytes(progress.loadedBytes ?? 0)} / ${formatBytes(progress.totalBytes)}`
+        : `${Math.round(progress.percent)}%`;
 
   const barWidth =
-    progress.step === "forwarding"
+    progress.step === "forwarding" || progress.step === "queued"
       ? "100%"
       : `${Math.max(0, Math.min(100, progress.percent))}%`;
 
@@ -58,7 +62,9 @@ export default function FloatingForwardProgress({
       ? "bg-blue-500"
       : progress.step === "uploading"
         ? "bg-emerald-500"
-        : "bg-zinc-400";
+        : progress.step === "queued"
+          ? "bg-amber-400"
+          : "bg-zinc-400";
 
   const handleCancelClick = () => {
     if (cancelling || !onCancel) return;

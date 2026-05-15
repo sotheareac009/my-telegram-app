@@ -1,5 +1,13 @@
 import { createClient } from "@/lib/telegram";
 import { buildMediaInfo } from "@/lib/telegram-media";
+import { acquireDownloadSlot } from "@/lib/download-queue";
+import {
+  newJobId,
+  recordProgress,
+  registerJob,
+  removeJob,
+  userKeyFromSession,
+} from "@/lib/forward-registry";
 import { Api } from "telegram";
 import { CustomFile } from "telegram/client/uploads";
 import bigInt from "big-integer";
@@ -111,6 +119,7 @@ function throwIfAborted(signal: AbortSignal): void {
 type ProgressEvent =
   | { type: "start"; total: number }
   | { type: "forwarding" }
+  | { type: "queued" }
   | { type: "message_start"; messageId: number; index: number; size: number | null }
   | { type: "download_progress"; messageId: number; index: number; loaded: number; total: number }
   | { type: "download_done"; messageId: number; index: number }
@@ -601,7 +610,18 @@ async function resendAsAlbum(
 }
 
 export async function POST(request: Request) {
-  const { sessionString, fromGroupId, toGroupId, messageIds } = await request.json();
+  const body = await request.json();
+  const {
+    sessionString,
+    fromGroupId,
+    toGroupId,
+    messageIds,
+    fromGroupTitle,
+    destinationTitle,
+    destinationIsChannel,
+    contentSummary,
+    contentThumbBase64,
+  } = body;
 
   if (
     !sessionString ||
@@ -621,106 +641,112 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid message IDs" }, { status: 400 });
   }
 
-  // One AbortController, fired by either:
-  //  - request.signal (Next.js aborts this when the underlying TCP connection
-  //    drops — e.g. tab closed, page reloaded, navigation away)
-  //  - ReadableStream.cancel() (consumer-side cancellation)
-  // Once aborted, the resend loop bails between messages instead of running
-  // the rest of the batch as a "ghost" job on the server.
+  // Job lifecycle is now decoupled from the HTTP request. The work runs
+  // detached on the server so reloading the tab or opening the queue in
+  // another tab can't cancel it; cancellation only happens via the explicit
+  // cancel endpoint (which aborts this controller through the registry).
   const ac = new AbortController();
-  const onClientAbort = () => ac.abort();
-  request.signal.addEventListener("abort", onClientAbort);
 
-  // Stream NDJSON progress events so the client can render a live progress bar
-  // for the download→resend fallback. One JSON object per line.
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      let closed = false;
-      const emit: ProgressEmitter = (event) => {
-        if (closed) return;
-        try {
-          controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
-        } catch {
-          closed = true;
-        }
-      };
+  const jobId = newJobId();
+  const userKey = userKeyFromSession(sessionString);
+  const messageIdsKey = [...parsedMessageIds].sort((a, b) => a - b).join(",");
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let client: any;
+  registerJob(
+    {
+      jobId,
+      userKey,
+      fromGroupId,
+      fromGroupTitle: typeof fromGroupTitle === "string" ? fromGroupTitle : undefined,
+      toGroupId,
+      destinationTitle: typeof destinationTitle === "string" ? destinationTitle : undefined,
+      destinationIsChannel: typeof destinationIsChannel === "boolean" ? destinationIsChannel : undefined,
+      contentSummary: typeof contentSummary === "string" ? contentSummary : undefined,
+      contentThumbBase64: typeof contentThumbBase64 === "string" ? contentThumbBase64 : undefined,
+      messageIdsKey,
+      firstMessageId: parsedMessageIds[0],
+      total: parsedMessageIds.length,
+    },
+    ac,
+  );
+
+  // Detached worker. We don't await it from the request handler — the POST
+  // returns immediately with { jobId } and the work proceeds in the
+  // background. Clients track progress via /api/telegram/forwards/stream.
+  void (async () => {
+    const emit: ProgressEmitter = (event) => recordProgress(jobId, event);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let client: any;
+    let removeReason: "done" | "error" | "cancelled" = "done";
+    let removeErrorMessage: string | undefined;
+
+    try {
+      client = createClient(sessionString);
+      await client.connect();
+
+      emit({ type: "start", total: parsedMessageIds.length });
+
+      // ── Step 1: Try the fast native forward ──────────────────────────
       try {
-        client = createClient(sessionString);
-        await client.connect();
+        emit({ type: "forwarding" });
+        await client.forwardMessages(toGroupId, {
+          messages: parsedMessageIds,
+          fromPeer: fromGroupId,
+        });
+        emit({ type: "done", method: "forward" });
+      } catch (forwardError: unknown) {
+        if (!isRestrictedError(forwardError)) throw forwardError;
 
-        emit({ type: "start", total: parsedMessageIds.length });
+        // ── Step 2: Restricted — download to temp file → re-upload ─────
+        console.info(
+          `[forward] native forward blocked (${(forwardError as Error).message}), ` +
+            `falling back to download→resend for ${parsedMessageIds.length} message(s)`,
+        );
 
-        // ── Step 1: Try the fast native forward ──────────────────────────
+        emit({ type: "queued" });
+        let releaseSlot: (() => void) | null = null;
+        try {
+          releaseSlot = await acquireDownloadSlot(ac.signal);
+        } catch (err) {
+          // Aborted while waiting in the queue.
+          throw err instanceof Error ? err : new ClientDisconnected();
+        }
         try {
           emit({ type: "forwarding" });
-          await client.forwardMessages(toGroupId, {
-            messages: parsedMessageIds,
-            fromPeer: fromGroupId,
-          });
-          emit({ type: "done", method: "forward" });
-        } catch (forwardError: unknown) {
-          if (!isRestrictedError(forwardError)) throw forwardError;
-
-          // ── Step 2: Restricted — download to temp file → re-upload ─────
-          console.info(
-            `[forward] native forward blocked (${(forwardError as Error).message}), ` +
-              `falling back to download→resend for ${parsedMessageIds.length} message(s)`
-          );
-
           await resendAsNewMessages(
             client,
             fromGroupId,
             toGroupId,
             parsedMessageIds,
             emit,
-            ac.signal
+            ac.signal,
           );
           emit({ type: "done", method: "resend" });
-        }
-      } catch (error: unknown) {
-        if (error instanceof ClientDisconnected) {
-          // Client is already gone — no point emitting; just log and exit.
-          console.info(
-            `[forward] client disconnected mid-operation; aborted remaining messages`
-          );
-        } else {
-          const message = error instanceof Error ? error.message : "Failed to forward messages";
-          emit({ type: "error", message });
-        }
-      } finally {
-        request.signal.removeEventListener("abort", onClientAbort);
-        if (client) {
-          try {
-            await client.disconnect();
-          } catch {
-            // ignore disconnect failures
-          }
-        }
-        closed = true;
-        try {
-          controller.close();
-        } catch {
-          // already closed
+        } finally {
+          releaseSlot();
         }
       }
-    },
-    cancel() {
-      // Consumer cancelled the stream (e.g., reader.cancel()). Treat the same
-      // as a client disconnect so the in-flight resend loop stops.
-      ac.abort();
-    },
-  });
+    } catch (error: unknown) {
+      if (error instanceof ClientDisconnected || ac.signal.aborted) {
+        console.info(`[forward] job ${jobId} cancelled mid-operation`);
+        removeReason = "cancelled";
+      } else {
+        const message = error instanceof Error ? error.message : "Failed to forward messages";
+        emit({ type: "error", message });
+        removeReason = "error";
+        removeErrorMessage = message;
+      }
+    } finally {
+      if (client) {
+        try {
+          await client.disconnect();
+        } catch {
+          // ignore disconnect failures
+        }
+      }
+      removeJob(jobId, removeReason, removeErrorMessage);
+    }
+  })();
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "application/x-ndjson; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      // Disable buffering on reverse proxies so events flush immediately
-      "X-Accel-Buffering": "no",
-    },
-  });
+  return Response.json({ jobId });
 }

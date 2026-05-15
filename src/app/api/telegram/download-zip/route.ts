@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/telegram";
 import { buildMediaInfo } from "@/lib/telegram-media";
+import { acquireDownloadSlot } from "@/lib/download-queue";
 import { Api } from "telegram";
 import bigInt from "big-integer";
 import archiver from "archiver";
@@ -44,8 +45,15 @@ function uniqueName(base: string, used: Set<string>): string {
 
 async function streamZipResponse(params: ZipParams) {
   const { sessionString, groupId, messageIds, filename } = params;
+  const releaseSlot = await acquireDownloadSlot();
+
   const client = createClient(sessionString);
-  await client.connect();
+  try {
+    await client.connect();
+  } catch (err) {
+    releaseSlot();
+    throw err;
+  }
 
   let cleaned = false;
   const cleanup = async () => {
@@ -55,6 +63,8 @@ async function streamZipResponse(params: ZipParams) {
       await client.disconnect();
     } catch (err) {
       console.error("[download-zip] disconnect error:", err);
+    } finally {
+      releaseSlot();
     }
   };
 

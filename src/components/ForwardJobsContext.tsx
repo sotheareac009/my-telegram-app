@@ -22,20 +22,9 @@ export type ForwardJobState = {
   destinationId: string;
   /** Sorted message IDs being forwarded. Used to detect duplicates on retry. */
   messageIdsKey: string;
+  /** First message id — anchor for fetching a sharper thumbnail. */
+  firstMessageId?: number;
 };
-
-/** NDJSON events streamed by /api/telegram/forward (mirrors ProgressEvent in route.ts). */
-type ForwardEvent =
-  | { type: "start"; total: number }
-  | { type: "forwarding" }
-  | { type: "message_start"; messageId: number; index: number; size: number | null }
-  | { type: "download_progress"; messageId: number; index: number; loaded: number; total: number }
-  | { type: "download_done"; messageId: number; index: number }
-  | { type: "upload_progress"; messageId: number; index: number; progress: number }
-  | { type: "upload_done"; messageId: number; index: number }
-  | { type: "message_skipped"; messageId: number; index: number; reason: string }
-  | { type: "done"; method: "forward" | "resend" }
-  | { type: "error"; message: string };
 
 export type StartForwardParams = {
   session: string;
@@ -52,16 +41,85 @@ export type StartForwardParams = {
 interface ForwardJobsContextValue {
   jobs: ReadonlyArray<ForwardJobState>;
   /** Returns the jobId of the newly-started job (or an existing duplicate). */
-  startForward: (params: StartForwardParams) => string;
+  startForward: (params: StartForwardParams) => Promise<string | null>;
   cancelForward: (jobId: string) => void;
   /** Suppress a job's floating card (use when shown inline in a modal). */
   suppressFloating: (jobId: string, suppress: boolean) => void;
+  /**
+   * Globally hide every floating progress card. Used by the Queue dashboard
+   * view, which renders the same jobs inline and would otherwise be covered
+   * by floating cards.
+   */
+  setHideAllFloating: (hide: boolean) => void;
+  /** Session passed at provider mount; queue rows need it to fetch hi-res thumbs. */
+  session: string | null;
 }
 
 const ForwardJobsContext = createContext<ForwardJobsContextValue | null>(null);
 
-function makeMessageIdsKey(ids: number[]): string {
-  return [...ids].sort((a, b) => a - b).join(",");
+/** Server-side job metadata shape (mirrors ForwardJobMeta in forward-registry.ts). */
+type ServerJobMeta = {
+  jobId: string;
+  userKey: string;
+  fromGroupId: string;
+  fromGroupTitle?: string;
+  toGroupId: string;
+  destinationTitle?: string;
+  destinationIsChannel?: boolean;
+  contentSummary?: string;
+  contentThumbBase64?: string;
+  messageIdsKey: string;
+  firstMessageId?: number;
+  total: number;
+  progress: {
+    step: "forwarding" | "queued" | "downloading" | "uploading" | "skipped";
+    index: number;
+    percent: number;
+    loadedBytes?: number;
+    totalBytes?: number;
+  };
+  startedAt: number;
+};
+
+type StreamMessage =
+  | { kind: "snapshot"; jobs: ServerJobMeta[] }
+  | { kind: "job_added"; job: ServerJobMeta }
+  | {
+      kind: "job_progress";
+      jobId: string;
+      userKey: string;
+      progress: ServerJobMeta["progress"];
+    }
+  | {
+      kind: "job_removed";
+      jobId: string;
+      userKey: string;
+      reason: "done" | "error" | "cancelled";
+      errorMessage?: string;
+    }
+  | { kind: "heartbeat" };
+
+function serverJobToState(job: ServerJobMeta): ForwardJobState {
+  return {
+    id: job.jobId,
+    sourceId: job.fromGroupId,
+    destinationId: job.toGroupId,
+    messageIdsKey: job.messageIdsKey,
+    firstMessageId: job.firstMessageId,
+    progress: {
+      total: job.total,
+      index: job.progress.index,
+      step: job.progress.step,
+      percent: job.progress.percent,
+      loadedBytes: job.progress.loadedBytes,
+      totalBytes: job.progress.totalBytes,
+      destinationTitle: job.destinationTitle,
+      destinationIsChannel: job.destinationIsChannel,
+      sourceTitle: job.fromGroupTitle,
+      contentSummary: job.contentSummary,
+      contentThumbBase64: job.contentThumbBase64,
+    },
+  };
 }
 
 export function useForwardJobs() {
@@ -72,17 +130,27 @@ export function useForwardJobs() {
   return ctx;
 }
 
-export function ForwardJobsProvider({ children }: { children: ReactNode }) {
+interface ProviderProps {
+  children: ReactNode;
+  session: string | null;
+}
+
+export function ForwardJobsProvider({ children, session }: ProviderProps) {
   const [jobs, setJobs] = useState<ForwardJobState[]>([]);
-  const controllersRef = useRef<Map<string, AbortController>>(new Map());
-  // Stable read of `jobs` for use inside callbacks without re-creating them.
+  const [suppressedIds, setSuppressedIds] = useState<Set<string>>(() => new Set());
+  const [hideAllFloating, setHideAllFloatingState] = useState(false);
+  const [toast, setToast] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+
+  // Keep a stable ref to the most recent jobs for use inside the stream
+  // callback without re-creating it on every state change.
   const jobsRef = useRef<ForwardJobState[]>([]);
   useEffect(() => {
     jobsRef.current = jobs;
   }, [jobs]);
 
-  const [suppressedIds, setSuppressedIds] = useState<Set<string>>(() => new Set());
-  const [toast, setToast] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+  const setHideAllFloating = useCallback((hide: boolean) => {
+    setHideAllFloatingState(hide);
+  }, []);
 
   useEffect(() => {
     if (!toast) return;
@@ -90,9 +158,144 @@ export function ForwardJobsProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  const cancelForward = useCallback((jobId: string) => {
-    controllersRef.current.get(jobId)?.abort();
-  }, []);
+  // Subscribe to the server-side job stream. One long-lived connection per
+  // tab. Reconnects with exponential backoff if it drops.
+  useEffect(() => {
+    if (!session) return;
+
+    let cancelled = false;
+    let backoff = 1000;
+    const ac = new AbortController();
+
+    const run = async () => {
+      while (!cancelled) {
+        try {
+          const res = await fetch("/api/telegram/forwards/stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sessionString: session }),
+            signal: ac.signal,
+          });
+          if (!res.ok || !res.body) throw new Error(`stream HTTP ${res.status}`);
+
+          backoff = 1000; // reset after a successful connect
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = "";
+
+          while (!cancelled) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            let nl: number;
+            while ((nl = buf.indexOf("\n")) !== -1) {
+              const line = buf.slice(0, nl).trim();
+              buf = buf.slice(nl + 1);
+              if (!line) continue;
+              let msg: StreamMessage;
+              try {
+                msg = JSON.parse(line) as StreamMessage;
+              } catch {
+                continue;
+              }
+              handleStreamMessage(msg);
+            }
+          }
+        } catch (err) {
+          if (cancelled || (err instanceof DOMException && err.name === "AbortError")) return;
+          // Network blip — wait and reconnect.
+          await new Promise((r) => setTimeout(r, backoff));
+          backoff = Math.min(backoff * 2, 15_000);
+        }
+      }
+    };
+
+    const handleStreamMessage = (msg: StreamMessage) => {
+      switch (msg.kind) {
+        case "snapshot": {
+          setJobs(msg.jobs.map(serverJobToState));
+          break;
+        }
+        case "job_added": {
+          const newJob = serverJobToState(msg.job);
+          setJobs((prev) => {
+            if (prev.some((j) => j.id === newJob.id)) return prev;
+            return [...prev, newJob];
+          });
+          break;
+        }
+        case "job_progress": {
+          setJobs((prev) =>
+            prev.map((job) =>
+              job.id === msg.jobId
+                ? {
+                    ...job,
+                    progress: {
+                      ...job.progress,
+                      index: msg.progress.index,
+                      step: msg.progress.step,
+                      percent: msg.progress.percent,
+                      loadedBytes: msg.progress.loadedBytes,
+                      totalBytes: msg.progress.totalBytes,
+                    },
+                  }
+                : job,
+            ),
+          );
+          break;
+        }
+        case "job_removed": {
+          const job = jobsRef.current.find((j) => j.id === msg.jobId);
+          setJobs((prev) => prev.filter((j) => j.id !== msg.jobId));
+          setSuppressedIds((prev) => {
+            if (!prev.has(msg.jobId)) return prev;
+            const next = new Set(prev);
+            next.delete(msg.jobId);
+            return next;
+          });
+          if (msg.reason === "done" && job) {
+            const total = job.progress.total;
+            const dest = job.progress.destinationTitle ?? "the selected chat";
+            setToast({
+              kind: "success",
+              message: `Forwarded ${total} item${total === 1 ? "" : "s"} to ${dest}.`,
+            });
+          } else if (msg.reason === "error") {
+            setToast({
+              kind: "error",
+              message: msg.errorMessage ?? "Failed to forward messages",
+            });
+          } else if (msg.reason === "cancelled" && job) {
+            const dest = job.progress.destinationTitle ?? "the destination";
+            setToast({ kind: "success", message: `Forward cancelled (${dest}).` });
+          }
+          break;
+        }
+        case "heartbeat":
+          break;
+      }
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [session]);
+
+  const cancelForward = useCallback(
+    (jobId: string) => {
+      if (!session) return;
+      void fetch("/api/telegram/forwards/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionString: session, jobId }),
+      });
+    },
+    [session],
+  );
 
   const suppressFloating = useCallback((jobId: string, suppress: boolean) => {
     setSuppressedIds((prev) => {
@@ -105,266 +308,58 @@ export function ForwardJobsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const startForward = useCallback((params: StartForwardParams): string => {
-    const {
-      session,
-      fromGroupId,
-      fromGroupTitle,
-      toGroupId,
-      destinationTitle,
-      destinationIsChannel,
-      messageIds,
-      contentSummary,
-      contentThumbBase64,
-    } = params;
-
-    const messageIdsKey = makeMessageIdsKey(messageIds);
-    // Dedupe by source+destination+selection so re-submitting the same forward
-    // just surfaces the existing job rather than spawning a parallel duplicate.
-    const existing = jobsRef.current.find(
-      (job) =>
-        job.sourceId === fromGroupId &&
-        job.destinationId === toGroupId &&
-        job.messageIdsKey === messageIdsKey,
-    );
-    if (existing) return existing.id;
-
-    const jobId =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `fwd_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-
-    const totalMessages = messageIds.length;
-
-    const withDestination = (p: ForwardProgress): ForwardProgress => ({
-      ...p,
-      destinationTitle,
-      destinationIsChannel,
-      sourceTitle: fromGroupTitle,
-      contentSummary,
-      contentThumbBase64,
-    });
-
-    const updateProgress = (
-      next: ForwardProgress | ((prev: ForwardProgress) => ForwardProgress),
-    ) => {
-      setJobs((prev) =>
-        prev.map((job) =>
-          job.id === jobId
-            ? {
-                ...job,
-                progress:
-                  typeof next === "function"
-                    ? withDestination(
-                        (next as (p: ForwardProgress) => ForwardProgress)(job.progress),
-                      )
-                    : withDestination(next),
-              }
-            : job,
-        ),
+  const startForward = useCallback(
+    async (params: StartForwardParams): Promise<string | null> => {
+      const messageIdsKey = [...params.messageIds].sort((a, b) => a - b).join(",");
+      const existing = jobsRef.current.find(
+        (job) =>
+          job.sourceId === params.fromGroupId &&
+          job.destinationId === params.toGroupId &&
+          job.messageIdsKey === messageIdsKey,
       );
-    };
-
-    const ac = new AbortController();
-    controllersRef.current.set(jobId, ac);
-
-    const initialProgress: ForwardProgress = withDestination({
-      total: totalMessages,
-      index: 0,
-      step: "forwarding",
-      percent: 0,
-    });
-    setJobs((prev) => [
-      ...prev,
-      {
-        id: jobId,
-        progress: initialProgress,
-        sourceId: fromGroupId,
-        destinationId: toGroupId,
-        messageIdsKey,
-      },
-    ]);
-
-    void (async () => {
-      let errorMessage: string | null = null;
-      let success = false;
-      let uploadedCount = 0;
+      if (existing) return existing.id;
 
       try {
-        const response = await fetch("/api/telegram/forward", {
+        const res = await fetch("/api/telegram/forward", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            sessionString: session,
-            fromGroupId,
-            toGroupId,
-            messageIds,
+            sessionString: params.session,
+            fromGroupId: params.fromGroupId,
+            fromGroupTitle: params.fromGroupTitle,
+            toGroupId: params.toGroupId,
+            destinationTitle: params.destinationTitle,
+            destinationIsChannel: params.destinationIsChannel,
+            messageIds: params.messageIds,
+            contentSummary: params.contentSummary,
+            contentThumbBase64: params.contentThumbBase64,
           }),
-          signal: ac.signal,
         });
-
-        if (!response.ok || !response.body) {
-          let serverError: string | undefined;
-          try {
-            const json = await response.json();
-            serverError = json?.error;
-          } catch {
-            // ignore JSON parse failures
-          }
-          throw new Error(serverError || `Forward failed (HTTP ${response.status})`);
+        if (!res.ok) {
+          const json = await res.json().catch(() => null);
+          throw new Error(json?.error ?? `Forward failed (HTTP ${res.status})`);
         }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = "";
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          let nl: number;
-          while ((nl = buf.indexOf("\n")) !== -1) {
-            const line = buf.slice(0, nl).trim();
-            buf = buf.slice(nl + 1);
-            if (!line) continue;
-            let event: ForwardEvent;
-            try {
-              event = JSON.parse(line) as ForwardEvent;
-            } catch {
-              continue;
-            }
-            switch (event.type) {
-              case "start":
-                updateProgress({
-                  total: event.total,
-                  index: 0,
-                  step: "forwarding",
-                  percent: 0,
-                });
-                break;
-              case "forwarding":
-                updateProgress((prev) => ({
-                  total: prev.total,
-                  index: 0,
-                  step: "forwarding",
-                  percent: 0,
-                }));
-                break;
-              case "message_start":
-                updateProgress({
-                  total: totalMessages,
-                  index: event.index,
-                  step: "downloading",
-                  percent: 0,
-                  loadedBytes: 0,
-                  totalBytes: event.size ?? undefined,
-                });
-                break;
-              case "download_progress": {
-                const pct = event.total > 0 ? (event.loaded / event.total) * 100 : 0;
-                updateProgress({
-                  total: totalMessages,
-                  index: event.index,
-                  step: "downloading",
-                  percent: pct,
-                  loadedBytes: event.loaded,
-                  totalBytes: event.total,
-                });
-                break;
-              }
-              case "download_done":
-                updateProgress((prev) => ({
-                  total: prev.total,
-                  index: event.index,
-                  step: "uploading",
-                  percent: 0,
-                }));
-                break;
-              case "upload_progress":
-                updateProgress({
-                  total: totalMessages,
-                  index: event.index,
-                  step: "uploading",
-                  percent: event.progress * 100,
-                });
-                break;
-              case "upload_done":
-                uploadedCount += 1;
-                updateProgress({
-                  total: totalMessages,
-                  index: event.index,
-                  step: "uploading",
-                  percent: 100,
-                });
-                break;
-              case "message_skipped":
-                updateProgress({
-                  total: totalMessages,
-                  index: event.index,
-                  step: "skipped",
-                  percent: 100,
-                });
-                break;
-              case "done":
-                success = true;
-                break;
-              case "error":
-                errorMessage = event.message;
-                break;
-            }
-          }
-        }
-
-        if (errorMessage) throw new Error(errorMessage);
-        if (!success) throw new Error("Forward ended without confirmation");
-
+        const json = (await res.json()) as { jobId: string };
+        return json.jobId;
+      } catch (error) {
         setToast({
-          kind: "success",
-          message: `Forwarded ${totalMessages} item${totalMessages === 1 ? "" : "s"} to ${
-            destinationTitle ?? "the selected chat"
-          }.`,
+          kind: "error",
+          message: error instanceof Error ? error.message : "Failed to start forward",
         });
-      } catch (error: unknown) {
-        const isAbort =
-          ac.signal.aborted ||
-          (error instanceof DOMException && error.name === "AbortError") ||
-          (error instanceof Error && error.name === "AbortError");
-        if (isAbort) {
-          setToast({
-            kind: "success",
-            message:
-              uploadedCount > 0
-                ? `Forward cancelled. ${uploadedCount} item${uploadedCount === 1 ? "" : "s"} already sent to ${destinationTitle ?? "the destination"}.`
-                : "Forward cancelled.",
-          });
-        } else {
-          setToast({
-            kind: "error",
-            message:
-              error instanceof Error ? error.message : "Failed to forward messages",
-          });
-        }
-      } finally {
-        controllersRef.current.delete(jobId);
-        setJobs((prev) => prev.filter((j) => j.id !== jobId));
-        setSuppressedIds((prev) => {
-          if (!prev.has(jobId)) return prev;
-          const next = new Set(prev);
-          next.delete(jobId);
-          return next;
-        });
+        return null;
       }
-    })();
-
-    return jobId;
-  }, []);
-
-  const value = useMemo<ForwardJobsContextValue>(
-    () => ({ jobs, startForward, cancelForward, suppressFloating }),
-    [jobs, startForward, cancelForward, suppressFloating],
+    },
+    [],
   );
 
-  const floatingJobs = jobs.filter((j) => !suppressedIds.has(j.id));
+  const value = useMemo<ForwardJobsContextValue>(
+    () => ({ jobs, startForward, cancelForward, suppressFloating, setHideAllFloating, session }),
+    [jobs, startForward, cancelForward, suppressFloating, setHideAllFloating, session],
+  );
+
+  const floatingJobs = hideAllFloating
+    ? []
+    : jobs.filter((j) => !suppressedIds.has(j.id));
 
   return (
     <ForwardJobsContext.Provider value={value}>

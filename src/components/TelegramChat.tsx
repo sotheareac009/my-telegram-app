@@ -41,7 +41,7 @@ const gradients = [
 ];
 
 function getGradient(id: string) {
-    const idx = id.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+    const idx = id?.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
     return gradients[idx % gradients.length];
 }
 
@@ -227,7 +227,7 @@ export default function TelegramChat({
 
     return (
         <div
-            className="flex flex-col h-full w-full py-2"
+            className="flex flex-col h-full w-full"
             style={{
                 background: "#f0f2f5",
                 fontFamily: "'Roboto', sans-serif",

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import LinksModal, { type LinkEntry } from "./LinksModal";
 import ForwardModal, { type ForwardDestination } from "./ForwardModal";
+import AutoArchiveModal from "./AutoArchiveModal";
 import MediaViewer from "./MediaViewer";
 import MessageSearch from "./MessageSearch";
 import Thumbnail from "./Thumbnail";
@@ -577,6 +578,7 @@ export default function GroupMedia({
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [linksModalOpen, setLinksModalOpen] = useState(false);
   const [forwardModalOpen, setForwardModalOpen] = useState(false);
+  const [autoArchiveOpen, setAutoArchiveOpen] = useState(false);
   // Forward jobs live in a global context so they survive when this component
   // unmounts (e.g., user navigates back to the channel list). The floating
   // progress cards and success/error toasts are rendered at the provider level.
@@ -1491,6 +1493,21 @@ export default function GroupMedia({
               <line x1="21" y1="21" x2="16.65" y2="16.65" />
             </svg>
           </button>
+          {/* Auto-archive button */}
+          {!selectionMode && (
+            <button
+              type="button"
+              onClick={() => setAutoArchiveOpen(true)}
+              title="Auto-archive new media from this chat"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="4" rx="1" />
+                <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
+                <path d="M10 12h4" />
+              </svg>
+            </button>
+          )}
           {/* Select button */}
           <button
             type="button"
@@ -1524,6 +1541,17 @@ export default function GroupMedia({
         </div>
       </div>
       {selectionToolbar}
+
+      {/* Auto-archive modal */}
+      {autoArchiveOpen && (
+        <AutoArchiveModal
+          session={session}
+          sourceChatId={groupId}
+          sourceChatTitle={groupTitle}
+          destinations={destinationChats}
+          onClose={() => setAutoArchiveOpen(false)}
+        />
+      )}
 
       {/* Leave confirmation modal */}
       {leaveConfirming && (

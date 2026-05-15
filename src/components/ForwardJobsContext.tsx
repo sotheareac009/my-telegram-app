@@ -16,6 +16,8 @@ import FloatingForwardProgress from "./FloatingForwardProgress";
 export type ForwardJobState = {
   id: string;
   progress: ForwardProgress;
+  /** "manual" = user-initiated forward; "archive" = auto-archive watcher. */
+  kind: "manual" | "archive";
   /** Source chat the messages are being forwarded *from*. */
   sourceId: string;
   /** Destination chat id this job is forwarding to. */
@@ -61,6 +63,7 @@ const ForwardJobsContext = createContext<ForwardJobsContextValue | null>(null);
 type ServerJobMeta = {
   jobId: string;
   userKey: string;
+  kind: "manual" | "archive";
   fromGroupId: string;
   fromGroupTitle?: string;
   toGroupId: string;
@@ -102,6 +105,7 @@ type StreamMessage =
 function serverJobToState(job: ServerJobMeta): ForwardJobState {
   return {
     id: job.jobId,
+    kind: job.kind ?? "manual",
     sourceId: job.fromGroupId,
     destinationId: job.toGroupId,
     messageIdsKey: job.messageIdsKey,
@@ -254,21 +258,26 @@ export function ForwardJobsProvider({ children, session }: ProviderProps) {
             next.delete(msg.jobId);
             return next;
           });
-          if (msg.reason === "done" && job) {
-            const total = job.progress.total;
-            const dest = job.progress.destinationTitle ?? "the selected chat";
-            setToast({
-              kind: "success",
-              message: `Forwarded ${total} item${total === 1 ? "" : "s"} to ${dest}.`,
-            });
-          } else if (msg.reason === "error") {
-            setToast({
-              kind: "error",
-              message: msg.errorMessage ?? "Failed to forward messages",
-            });
-          } else if (msg.reason === "cancelled" && job) {
-            const dest = job.progress.destinationTitle ?? "the destination";
-            setToast({ kind: "success", message: `Forward cancelled (${dest}).` });
+          // Auto-archive jobs stay silent — no toasts. They finish constantly
+          // in the background; the Queue dashboard is where they're tracked.
+          const isArchive = job?.kind === "archive";
+          if (!isArchive) {
+            if (msg.reason === "done" && job) {
+              const total = job.progress.total;
+              const dest = job.progress.destinationTitle ?? "the selected chat";
+              setToast({
+                kind: "success",
+                message: `Forwarded ${total} item${total === 1 ? "" : "s"} to ${dest}.`,
+              });
+            } else if (msg.reason === "error") {
+              setToast({
+                kind: "error",
+                message: msg.errorMessage ?? "Failed to forward messages",
+              });
+            } else if (msg.reason === "cancelled" && job) {
+              const dest = job.progress.destinationTitle ?? "the destination";
+              setToast({ kind: "success", message: `Forward cancelled (${dest}).` });
+            }
           }
           break;
         }
@@ -357,9 +366,11 @@ export function ForwardJobsProvider({ children, session }: ProviderProps) {
     [jobs, startForward, cancelForward, suppressFloating, setHideAllFloating, session],
   );
 
+  // Auto-archive jobs are dashboard-only — they'd otherwise pop a floating
+  // card for every archived photo. They still show in the Queue dashboard.
   const floatingJobs = hideAllFloating
     ? []
-    : jobs.filter((j) => !suppressedIds.has(j.id));
+    : jobs.filter((j) => j.kind !== "archive" && !suppressedIds.has(j.id));
 
   return (
     <ForwardJobsContext.Provider value={value}>

@@ -33,6 +33,8 @@ export type ForwardProgressEvent =
 export type ForwardJobMeta = {
   jobId: string;
   userKey: string;
+  /** "manual" = user-initiated forward; "archive" = auto-archive watcher. */
+  kind: "manual" | "archive";
   fromGroupId: string;
   fromGroupTitle?: string;
   toGroupId: string;
@@ -70,7 +72,6 @@ type RegistryState = {
 };
 
 declare global {
-  // eslint-disable-next-line no-var
   var __forwardRegistry: RegistryState | undefined;
 }
 
@@ -97,13 +98,15 @@ export function newJobId(): string {
 
 /** Add a job to the registry. Called when /api/telegram/forward starts work. */
 export function registerJob(
-  meta: Omit<ForwardJobMeta, "progress" | "startedAt"> & {
+  meta: Omit<ForwardJobMeta, "progress" | "startedAt" | "kind"> & {
     progress?: ForwardJobMeta["progress"];
+    kind?: ForwardJobMeta["kind"];
   },
   controller: AbortController,
 ): ForwardJobMeta {
   const job: StoredJob = {
     ...meta,
+    kind: meta.kind ?? "manual",
     progress: meta.progress ?? { step: "forwarding", index: 0, percent: 0 },
     startedAt: Date.now(),
     controller,

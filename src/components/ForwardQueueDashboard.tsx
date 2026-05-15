@@ -117,6 +117,7 @@ export default function ForwardQueueDashboard() {
                 key={job.id}
                 jobId={job.id}
                 progress={job.progress}
+                kind={job.kind}
                 session={session}
                 sourceId={job.sourceId}
                 firstMessageId={job.firstMessageId}
@@ -139,6 +140,7 @@ export default function ForwardQueueDashboard() {
                 key={job.id}
                 jobId={job.id}
                 progress={job.progress}
+                kind={job.kind}
                 session={session}
                 sourceId={job.sourceId}
                 firstMessageId={job.firstMessageId}
@@ -183,6 +185,7 @@ export default function ForwardQueueDashboard() {
 interface QueueRowProps {
   jobId: string;
   progress: ForwardProgress;
+  kind: "manual" | "archive";
   session: string | null;
   sourceId: string;
   firstMessageId?: number;
@@ -193,7 +196,7 @@ interface QueueRowProps {
 // Survives navigations within a session so re-opening the queue doesn't re-fetch.
 const thumbCache = new Map<string, string>();
 
-function QueueRow({ progress, session, sourceId, firstMessageId, onCancel }: QueueRowProps) {
+function QueueRow({ progress, kind, session, sourceId, firstMessageId, onCancel }: QueueRowProps) {
   const [cancelling, setCancelling] = useState(false);
   const [thumbBroken, setThumbBroken] = useState(false);
   const [hiResThumb, setHiResThumb] = useState<string | null>(() => {
@@ -201,22 +204,15 @@ function QueueRow({ progress, session, sourceId, firstMessageId, onCancel }: Que
     return thumbCache.get(`${sourceId}:${firstMessageId}`) ?? null;
   });
 
-  useEffect(() => {
-    setThumbBroken(false);
-  }, [progress.contentThumbBase64]);
-
   // Fetch a sharper thumbnail to replace the blurry stripped-preview JPEG.
   // The inline thumb Telegram embeds in messages is ~40px wide; rendering it
   // at 48px upscales and looks blurry. /api/telegram/thumb downloads a proper
-  // 100–320px JPEG from Telegram.
+  // 100–320px JPEG from Telegram. (A cache hit is already applied via the
+  // useState initializer, so the effect only handles the fetch path.)
   useEffect(() => {
     if (firstMessageId === undefined || !session) return;
     const cacheKey = `${sourceId}:${firstMessageId}`;
-    const cached = thumbCache.get(cacheKey);
-    if (cached) {
-      setHiResThumb(cached);
-      return;
-    }
+    if (thumbCache.has(cacheKey)) return;
     let cancelled = false;
     const ac = new AbortController();
     void (async () => {
@@ -294,6 +290,15 @@ function QueueRow({ progress, session, sourceId, firstMessageId, onCancel }: Que
         {/* Source → destination + cancel */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5 text-xs text-zinc-700 dark:text-zinc-300">
+            {kind === "archive" && (
+              <span className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2 text-[10px] font-semibold uppercase tracking-wider text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="4" width="18" height="4" rx="1" />
+                  <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" />
+                </svg>
+                Auto
+              </span>
+            )}
             {progress.sourceTitle && (
               <>
                 <span className="min-w-0 truncate font-medium">{progress.sourceTitle}</span>

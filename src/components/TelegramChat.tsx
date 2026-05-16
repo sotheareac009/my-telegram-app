@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface Message {
@@ -27,6 +27,12 @@ interface TelegramChatProps {
     onSendMessage: (text: string) => void;
     onBack?: () => void;
     isLoading?: boolean;
+    /** Pull older history when the user scrolls near the top. */
+    onLoadOlder?: () => void;
+    /** Whether more older messages may exist. */
+    hasMoreOlder?: boolean;
+    /** True while an older-history batch is being fetched. */
+    loadingOlder?: boolean;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -187,6 +193,9 @@ export default function TelegramChat({
     onSendMessage,
     onBack,
     isLoading = false,
+    onLoadOlder,
+    hasMoreOlder = false,
+    loadingOlder = false,
 }: TelegramChatProps) {
     const [input, setInput] = useState("");
     const [isTyping, setIsTyping] = useState(false);
@@ -204,6 +213,9 @@ export default function TelegramChat({
     const atBottomRef = useRef(true);
     const didInitialScrollRef = useRef(false);
     const forceScrollRef = useRef(false);
+    // While an older-history batch is loading, holds the scrollHeight captured
+    // *before* the prepend, so the viewport can be re-anchored afterwards.
+    const prependAnchorRef = useRef<number | null>(null);
 
     function handleScroll() {
         const el = scrollRef.current;
@@ -211,7 +223,34 @@ export default function TelegramChat({
         const distanceFromBottom =
             el.scrollHeight - el.scrollTop - el.clientHeight;
         atBottomRef.current = distanceFromBottom < 120;
+        // Near the top — pull older history (infinite scroll up). The anchor
+        // ref doubles as an in-flight guard so it fires once per batch.
+        if (
+            el.scrollTop < 80 &&
+            hasMoreOlder &&
+            !loadingOlder &&
+            prependAnchorRef.current === null &&
+            onLoadOlder
+        ) {
+            prependAnchorRef.current = el.scrollHeight;
+            onLoadOlder();
+        }
     }
+
+    // Before paint: if older messages were just prepended, shift scrollTop by
+    // the height they added so the user stays on the same message.
+    useLayoutEffect(() => {
+        const el = scrollRef.current;
+        if (!el || prependAnchorRef.current === null) return;
+        el.scrollTop += el.scrollHeight - prependAnchorRef.current;
+        prependAnchorRef.current = null;
+    }, [messages]);
+
+    // Clear the anchor if a load-older finished without new messages (start
+    // of history reached) — otherwise the in-flight guard would stay stuck.
+    useEffect(() => {
+        if (!loadingOlder) prependAnchorRef.current = null;
+    }, [loadingOlder]);
 
     // New chat selected — re-arm the one-time jump-to-bottom.
     useEffect(() => {
@@ -343,6 +382,11 @@ export default function TelegramChat({
                     </div>
                 ) : (
                     <>
+                        {loadingOlder && (
+                            <div className="flex justify-center py-2">
+                                <div className="w-5 h-5 border-2 border-[#3390ec] border-t-transparent rounded-full animate-spin" />
+                            </div>
+                        )}
                         {grouped.map((group) => (
                             <div key={group.label}>
                                 <DateDivider label={group.label} />

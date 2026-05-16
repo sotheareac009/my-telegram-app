@@ -112,9 +112,48 @@ export default function RecentChats({ sessionString }: { sessionString: string }
     const [selectedContact, setSelectedContact] = useState<ChatContact | null>(null);
     const [messages, setMessages] = useState<ChatUiMessage[]>([]);
     const [messagesLoading, setMessagesLoading] = useState(false);
+    const [hasMoreOlder, setHasMoreOlder] = useState(true);
+    const [loadingOlder, setLoadingOlder] = useState(false);
     // The currently-open chat id. Used to discard in-flight fetches/polls
     // that resolve after the user has switched to a different chat.
     const activeChatIdRef = useRef<string | null>(null);
+
+    /** Infinite scroll up: fetch a page of messages older than the oldest one
+     * currently loaded, and merge them in. */
+    async function loadOlder() {
+        const contact = selectedContact;
+        if (!contact || loadingOlder || !hasMoreOlder) return;
+        const oldest = messages[0];
+        if (!oldest) return;
+        setLoadingOlder(true);
+        try {
+            const res = await fetch("/api/telegram/conversation", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    sessionString,
+                    userId: contact.id,
+                    accessHash: contact.accessHash,
+                    limit: 50,
+                    offsetId: Number(oldest.id),
+                }),
+            });
+            const data = await res.json();
+            if (activeChatIdRef.current !== contact.id) return;
+            const older = Array.isArray(data.messages)
+                ? (data.messages as ApiMessage[]).map(toUiMessage)
+                : [];
+            // Fewer than a full page back ⇒ we've reached the start of history.
+            if (older.length < 50) setHasMoreOlder(false);
+            if (older.length > 0) {
+                setMessages((prev) => mergeMessages(prev, older));
+            }
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setLoadingOlder(false);
+        }
+    }
 
     async function loadConversation(
         userId: string,
@@ -187,6 +226,8 @@ export default function RecentChats({ sessionString }: { sessionString: string }
         activeChatIdRef.current = null;
         setSelectedContact(null);
         setMessages([]);
+        setHasMoreOlder(true);
+        setLoadingOlder(false);
     }
 
     async function loadContacts(currentPage = 1, currentSearch = "") {
@@ -223,6 +264,8 @@ export default function RecentChats({ sessionString }: { sessionString: string }
         // Reset the conversation and start loading this chat's history.
         activeChatIdRef.current = contact.id;
         setMessages([]);
+        setHasMoreOlder(true);
+        setLoadingOlder(false);
         void loadConversation(contact.id, contact.accessHash, true);
 
         // fetch full user details (online status, bio, etc.)
@@ -283,6 +326,9 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                 messages={messages}
                                 onSendMessage={handleSendMessage}
                                 isLoading={messagesLoading}
+                                onLoadOlder={loadOlder}
+                                hasMoreOlder={hasMoreOlder}
+                                loadingOlder={loadingOlder}
                             />
                         </div>
                     </div>

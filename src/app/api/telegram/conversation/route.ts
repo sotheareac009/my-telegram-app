@@ -45,7 +45,8 @@ function mapMessage(msg: any): ChatMessage | null {
 }
 
 export async function POST(request: Request) {
-  const { sessionString, userId, accessHash, limit } = await request.json();
+  const { sessionString, userId, accessHash, limit, offsetId } =
+    await request.json();
   if (typeof sessionString !== "string" || !sessionString) {
     return Response.json({ error: "Missing sessionString" }, { status: 400 });
   }
@@ -58,9 +59,17 @@ export async function POST(request: Request) {
     await client.connect();
 
     const pageSize = Math.min(200, Math.max(1, Number(limit) || 50));
-    const messages = await client.getMessages(resolvePeer(userId, accessHash), {
-      limit: pageSize,
-    });
+    // offsetId paginates into older history — getMessages returns messages
+    // with id < offsetId. Omitted/0 ⇒ newest messages.
+    const getOpts: { limit: number; offsetId?: number } = { limit: pageSize };
+    const parsedOffset = Number(offsetId);
+    if (Number.isFinite(parsedOffset) && parsedOffset > 0) {
+      getOpts.offsetId = parsedOffset;
+    }
+    const messages = await client.getMessages(
+      resolvePeer(userId, accessHash),
+      getOpts,
+    );
 
     // getMessages returns newest-first; reverse for chronological display.
     const mapped: ChatMessage[] = [];

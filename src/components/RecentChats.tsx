@@ -1,11 +1,52 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LayoutGrid, List, ChevronLeft, ChevronRight, Search, X, ArrowLeft } from "lucide-react";
 import TelegramChat from "@/components/TelegramChat";
 
+/** Chat message shape consumed by <TelegramChat>. */
+type ChatUiMessage = {
+    id: string;
+    text: string;
+    timestamp: Date;
+    fromMe: boolean;
+    status?: "sent" | "delivered" | "read";
+};
+
+/** Raw message shape returned by /api/telegram/conversation. */
+type ApiMessage = {
+    id: number;
+    text: string;
+    date: number;
+    fromMe: boolean;
+    status?: "sent" | "read";
+};
+
+function toUiMessage(m: ApiMessage): ChatUiMessage {
+    return {
+        id: String(m.id),
+        text: m.text,
+        timestamp: new Date(m.date * 1000),
+        fromMe: m.fromMe,
+        status: m.status,
+    };
+}
+
+/** Union two message lists by id (newer list wins, so read-status updates),
+ * sorted oldest → newest. */
+function mergeMessages(a: ChatUiMessage[], b: ChatUiMessage[]): ChatUiMessage[] {
+    const map = new Map<string, ChatUiMessage>();
+    for (const m of a) map.set(m.id, m);
+    for (const m of b) map.set(m.id, m);
+    return [...map.values()].sort(
+        (x, y) => x.timestamp.getTime() - y.timestamp.getTime(),
+    );
+}
+
 type Contact = {
     id: string;
+    /** Telegram per-user security token — required to address non-contacts. */
+    accessHash: string;
     firstName: string;
     lastName: string;
     username: string;
@@ -15,6 +56,7 @@ type Contact = {
 
 type ChatContact = {
     id: string;
+    accessHash: string;
     firstName: string;
     lastName?: string;
     username?: string;
@@ -68,12 +110,89 @@ export default function RecentChats({ sessionString }: { sessionString: string }
 
     // ── Chat state ──
     const [selectedContact, setSelectedContact] = useState<ChatContact | null>(null);
-    const [chatLoading, setChatLoading] = useState(false);
+    const [messages, setMessages] = useState<ChatUiMessage[]>([]);
+    const [messagesLoading, setMessagesLoading] = useState(false);
+    // The currently-open chat id. Used to discard in-flight fetches/polls
+    // that resolve after the user has switched to a different chat.
+    const activeChatIdRef = useRef<string | null>(null);
+
+    async function loadConversation(
+        userId: string,
+        accessHash: string,
+        initial: boolean,
+    ) {
+        if (initial) setMessagesLoading(true);
+        try {
+            const res = await fetch("/api/telegram/conversation", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sessionString, userId, accessHash, limit: 100 }),
+            });
+            const data = await res.json();
+            if (activeChatIdRef.current !== userId) return; // switched chats
+            if (Array.isArray(data.messages)) {
+                const incoming = (data.messages as ApiMessage[]).map(toUiMessage);
+                setMessages((prev) => mergeMessages(prev, incoming));
+            }
+        } catch (err) {
+            console.error(err);
+        } finally {
+            if (initial) setMessagesLoading(false);
+        }
+    }
+
+    async function handleSendMessage(text: string) {
+        const contact = selectedContact;
+        if (!contact) return;
+        try {
+            const res = await fetch("/api/telegram/send-message", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    sessionString,
+                    userId: contact.id,
+                    accessHash: contact.accessHash,
+                    text,
+                }),
+            });
+            const data = await res.json();
+            if (data.message && activeChatIdRef.current === contact.id) {
+                setMessages((prev) => mergeMessages(prev, [toUiMessage(data.message)]));
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    // Live updates: poll the open conversation every 3s. The ref keeps the
+    // interval stable while always calling the latest closure.
+    const pollRef = useRef<() => void>(() => {});
+    pollRef.current = () => {
+        if (selectedContact) {
+            void loadConversation(
+                selectedContact.id,
+                selectedContact.accessHash,
+                false,
+            );
+        }
+    };
+    useEffect(() => {
+        const id = selectedContact?.id;
+        if (!id) return;
+        const interval = setInterval(() => pollRef.current(), 3000);
+        return () => clearInterval(interval);
+    }, [selectedContact?.id]);
+
+    function closeChat() {
+        activeChatIdRef.current = null;
+        setSelectedContact(null);
+        setMessages([]);
+    }
 
     async function loadContacts(currentPage = 1, currentSearch = "") {
         try {
             setLoading(true);
-            const res = await fetch("/api/telegram/recent-chat", {
+            const res = await fetch("/api/telegram/recent-dialogs", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ sessionString, page: currentPage, limit: 30, search: currentSearch }),
@@ -94,29 +213,37 @@ export default function RecentChats({ sessionString }: { sessionString: string }
         // optimistically show chat immediately with basic info
         setSelectedContact({
             id: contact.id,
+            accessHash: contact.accessHash,
             firstName: contact.firstName,
             lastName: contact.lastName,
             username: contact.username,
             phone: contact.phone,
             photo: contact.photo ?? null,
         });
-        setChatLoading(true);
+        // Reset the conversation and start loading this chat's history.
+        activeChatIdRef.current = contact.id;
+        setMessages([]);
+        void loadConversation(contact.id, contact.accessHash, true);
 
         // fetch full user details (online status, bio, etc.)
         try {
             const res = await fetch("/api/telegram/user", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ sessionString, userId: contact.id }),
+                body: JSON.stringify({
+                    sessionString,
+                    userId: contact.id,
+                    accessHash: contact.accessHash,
+                }),
             });
             const data = await res.json();
-            if (data.success) {
-                setSelectedContact(data.user);
+            // Ignore if the user switched chats while this was in flight.
+            if (data.success && activeChatIdRef.current === contact.id) {
+                // The /user response omits accessHash — keep the one we have.
+                setSelectedContact({ ...data.user, accessHash: contact.accessHash });
             }
         } catch (err) {
             console.error(err);
-        } finally {
-            setChatLoading(false);
         }
     }
 
@@ -134,7 +261,7 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                 {/* Breadcrumb */}
                 <div className="flex items-center gap-2 px-4 py-2.5 bg-white border-b border-stone-200 shrink-0">
                     <button
-                        onClick={() => setSelectedContact(null)}
+                        onClick={closeChat}
                         className="flex items-center gap-1.5 text-[13px] font-medium text-stone-500 hover:text-indigo-500 transition-colors"
                     >
                         <ArrowLeft size={15} />
@@ -153,9 +280,9 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                             <TelegramChat
                                 //@ts-ignore
                                 contact={selectedContact}
-                                messages={[]}
-                                onSendMessage={() => { }}
-                                isLoading={chatLoading}
+                                messages={messages}
+                                onSendMessage={handleSendMessage}
+                                isLoading={messagesLoading}
                             />
                         </div>
                     </div>

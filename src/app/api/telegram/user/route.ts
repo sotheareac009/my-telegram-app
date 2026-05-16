@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/telegram";
 import { Api } from "telegram";
+import bigInt from "big-integer";
 
 export async function POST(request: Request) {
     try {
@@ -9,6 +10,7 @@ export async function POST(request: Request) {
 
         const sessionString = body.sessionString;
         const userId = body.userId;
+        const accessHash = body.accessHash;
 
         if (!sessionString) {
             return Response.json(
@@ -32,15 +34,14 @@ export async function POST(request: Request) {
                 new Api.users.GetUsers({
                     id: [
                         new Api.InputUser({
-                            //@ts-ignore
-                            userId: BigInt(userId),
-                            //@ts-ignore
-                            accessHash: BigInt(0),
+                            userId: bigInt(String(userId)),
+                            accessHash: bigInt(String(accessHash || "0")),
                         }),
                     ],
                 })
             );
 
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const user = result[0] as any;
 
             if (!user) {

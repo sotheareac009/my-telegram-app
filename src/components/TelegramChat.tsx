@@ -191,12 +191,52 @@ export default function TelegramChat({
     const [input, setInput] = useState("");
     const [isTyping, setIsTyping] = useState(false);
     const bottomRef = useRef<HTMLDivElement>(null);
+    const scrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const grouped = groupMessagesByDate(messages);
 
-    // auto-scroll to bottom on new messages
+    // Scroll behaviour:
+    //  - atBottomRef: is the user parked near the bottom of the history?
+    //  - didInitialScrollRef: has the one-time jump-to-bottom run for this
+    //    chat? Re-armed when the contact changes.
+    //  - forceScrollRef: set when the user sends, so their own message is
+    //    always revealed even if they were scrolled up reading history.
+    const atBottomRef = useRef(true);
+    const didInitialScrollRef = useRef(false);
+    const forceScrollRef = useRef(false);
+
+    function handleScroll() {
+        const el = scrollRef.current;
+        if (!el) return;
+        const distanceFromBottom =
+            el.scrollHeight - el.scrollTop - el.clientHeight;
+        atBottomRef.current = distanceFromBottom < 120;
+    }
+
+    // New chat selected — re-arm the one-time jump-to-bottom.
     useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+        didInitialScrollRef.current = false;
+        atBottomRef.current = true;
+    }, [contact.id]);
+
+    // Pin to the latest message only when appropriate, so a background poll
+    // doesn't yank the user away from history they're scrolled up reading.
+    useEffect(() => {
+        const el = scrollRef.current;
+        if (!el) return;
+        // First batch for this chat — jump straight to the bottom.
+        if (!didInitialScrollRef.current && messages.length > 0) {
+            el.scrollTop = el.scrollHeight;
+            didInitialScrollRef.current = true;
+            atBottomRef.current = true;
+            forceScrollRef.current = false;
+            return;
+        }
+        // Otherwise only follow if the user is at the bottom, or just sent.
+        if (forceScrollRef.current || atBottomRef.current) {
+            bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+            forceScrollRef.current = false;
+        }
     }, [messages, isTyping]);
 
     // auto-resize textarea
@@ -209,6 +249,8 @@ export default function TelegramChat({
     function handleSend() {
         const text = input.trim();
         if (!text) return;
+        // Reveal the user's own message even if they were reading history.
+        forceScrollRef.current = true;
         onSendMessage(text);
         setInput("");
         if (inputRef.current) {
@@ -279,7 +321,9 @@ export default function TelegramChat({
 
             {/* ── Messages ── */}
             <div
-                className="flex-1 overflow-y-auto px-4 py-2 scroll-smooth"
+                ref={scrollRef}
+                onScroll={handleScroll}
+                className="flex-1 overflow-y-auto px-4 py-2"
                 style={{
                     backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%234a90d9' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
                 }}

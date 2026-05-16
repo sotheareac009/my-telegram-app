@@ -16,9 +16,9 @@ interface Contact {
 }
 
 export default function ChatPage() {
+    //@ts-ignore
     const searchParams = useSearchParams();
     const userId = searchParams.get("id") as string;
-    console.log("User ID from params:", userId);
 
     const [contact, setContact] = useState<Contact | null>(null);
     const [isLoading, setIsLoading] = useState(true);

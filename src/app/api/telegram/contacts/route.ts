@@ -33,6 +33,9 @@ export async function POST(request: Request) {
             //@ts-ignore
             let contacts = result.users.map((user: any) => ({
                 id: user.id?.toString(),
+                // accessHash is the per-user security token the conversation /
+                // send-message routes need to address this user.
+                accessHash: user.accessHash ? user.accessHash.toString() : "0",
                 firstName: user.firstName || "",
                 lastName: user.lastName || "",
                 username: user.username || "",

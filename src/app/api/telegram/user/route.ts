@@ -2,7 +2,7 @@
 
 import { createClient } from "@/lib/telegram";
 import { Api } from "telegram";
-import bigInt from "big-integer";
+import { resolveInputUser } from "@/lib/telegram-peer";
 
 export async function POST(request: Request) {
     try {
@@ -30,15 +30,9 @@ export async function POST(request: Request) {
         await client.connect();
 
         try {
+            const inputUser = await resolveInputUser(client, userId, accessHash);
             const result = await client.invoke(
-                new Api.users.GetUsers({
-                    id: [
-                        new Api.InputUser({
-                            userId: bigInt(String(userId)),
-                            accessHash: bigInt(String(accessHash || "0")),
-                        }),
-                    ],
-                })
+                new Api.users.GetUsers({ id: [inputUser] })
             );
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any

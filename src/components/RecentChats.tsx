@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { LayoutGrid, List, ChevronLeft, ChevronRight, Search, X, ArrowLeft } from "lucide-react";
 import TelegramChat from "@/components/TelegramChat";
+import type { ChatMedia } from "@/app/api/telegram/conversation/route";
 
 /** Chat message shape consumed by <TelegramChat>. */
 type ChatUiMessage = {
@@ -11,6 +12,8 @@ type ChatUiMessage = {
     timestamp: Date;
     fromMe: boolean;
     status?: "sent" | "delivered" | "read";
+    media?: ChatMedia;
+    groupedId?: string;
 };
 
 /** Raw message shape returned by /api/telegram/conversation. */
@@ -20,6 +23,8 @@ type ApiMessage = {
     date: number;
     fromMe: boolean;
     status?: "sent" | "read";
+    media?: ChatMedia;
+    groupedId?: string;
 };
 
 function toUiMessage(m: ApiMessage): ChatUiMessage {
@@ -29,6 +34,8 @@ function toUiMessage(m: ApiMessage): ChatUiMessage {
         timestamp: new Date(m.date * 1000),
         fromMe: m.fromMe,
         status: m.status,
+        media: m.media,
+        groupedId: m.groupedId,
     };
 }
 
@@ -329,6 +336,7 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                 onLoadOlder={loadOlder}
                                 hasMoreOlder={hasMoreOlder}
                                 loadingOlder={loadingOlder}
+                                sessionString={sessionString}
                             />
                         </div>
                     </div>

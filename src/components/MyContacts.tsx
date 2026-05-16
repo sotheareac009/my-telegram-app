@@ -1,16 +1,77 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { LayoutGrid, List, ChevronLeft, ChevronRight, Search, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { LayoutGrid, List, ChevronLeft, ChevronRight, Search, X, ArrowLeft } from "lucide-react";
 import TelegramChat from "./TelegramChat";
+import type { ChatMedia } from "@/app/api/telegram/conversation/route";
 
 type Contact = {
     id: string;
+    /** Telegram per-user security token — required to address the user. */
+    accessHash: string;
     firstName: string;
     lastName: string;
     username: string;
     phone: string;
+    photo?: string | null;
 };
+
+type ChatContact = {
+    id: string;
+    accessHash: string;
+    firstName: string;
+    lastName?: string;
+    username?: string;
+    phone?: string;
+    photo?: string | null;
+    isOnline?: boolean;
+    lastSeen?: string | null;
+};
+
+/** Chat message shape consumed by <TelegramChat>. */
+type ChatUiMessage = {
+    id: string;
+    text: string;
+    timestamp: Date;
+    fromMe: boolean;
+    status?: "sent" | "delivered" | "read";
+    media?: ChatMedia;
+    groupedId?: string;
+};
+
+/** Raw message shape returned by /api/telegram/conversation. */
+type ApiMessage = {
+    id: number;
+    text: string;
+    date: number;
+    fromMe: boolean;
+    status?: "sent" | "read";
+    media?: ChatMedia;
+    groupedId?: string;
+};
+
+function toUiMessage(m: ApiMessage): ChatUiMessage {
+    return {
+        id: String(m.id),
+        text: m.text,
+        timestamp: new Date(m.date * 1000),
+        fromMe: m.fromMe,
+        status: m.status,
+        media: m.media,
+        groupedId: m.groupedId,
+    };
+}
+
+/** Union two message lists by id (newer list wins, so read-status updates),
+ * sorted oldest → newest. */
+function mergeMessages(a: ChatUiMessage[], b: ChatUiMessage[]): ChatUiMessage[] {
+    const map = new Map<string, ChatUiMessage>();
+    for (const m of a) map.set(m.id, m);
+    for (const m of b) map.set(m.id, m);
+    return [...map.values()].sort(
+        (x, y) => x.timestamp.getTime() - y.timestamp.getTime(),
+    );
+}
 
 const AVATAR_GRADIENTS = [
     "from-violet-400 to-indigo-500",
@@ -27,6 +88,24 @@ function getAvatarGradient(name: string) {
     return AVATAR_GRADIENTS[Math.abs(hash) % AVATAR_GRADIENTS.length];
 }
 
+function ContactAvatar({ contact, name, gradient }: { contact: Contact; name: string; gradient: string }) {
+    const [imgError, setImgError] = useState(false);
+    return (
+        <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${gradient} flex items-center justify-center text-white font-semibold text-[15px] shrink-0 shadow-sm overflow-hidden`}>
+            {contact.photo && !imgError ? (
+                <img
+                    src={contact.photo}
+                    alt={contact.firstName}
+                    className="w-10 h-10 rounded-full object-cover"
+                    onError={() => setImgError(true)}
+                />
+            ) : (
+                name.charAt(0).toUpperCase()
+            )}
+        </div>
+    );
+}
+
 export default function MyContacts({ sessionString }: { sessionString: string }) {
     const [contacts, setContacts] = useState<Contact[]>([]);
     const [loading, setLoading] = useState(true);
@@ -35,6 +114,16 @@ export default function MyContacts({ sessionString }: { sessionString: string })
     const [totalPages, setTotalPages] = useState(1);
     const [search, setSearch] = useState("");
     const [searchInput, setSearchInput] = useState("");
+
+    // ── Chat state ──
+    const [selectedContact, setSelectedContact] = useState<ChatContact | null>(null);
+    const [messages, setMessages] = useState<ChatUiMessage[]>([]);
+    const [messagesLoading, setMessagesLoading] = useState(false);
+    const [hasMoreOlder, setHasMoreOlder] = useState(true);
+    const [loadingOlder, setLoadingOlder] = useState(false);
+    // The currently-open chat id. Used to discard in-flight fetches/polls
+    // that resolve after the user has switched to a different chat.
+    const activeChatIdRef = useRef<string | null>(null);
 
     async function loadContacts(currentPage = 1, currentSearch = "") {
         try {
@@ -56,6 +145,158 @@ export default function MyContacts({ sessionString }: { sessionString: string })
 
     useEffect(() => { loadContacts(page, search); }, [page, search]);
 
+    /** Infinite scroll up: fetch a page of messages older than the oldest one
+     * currently loaded, and merge them in. */
+    async function loadOlder() {
+        const contact = selectedContact;
+        if (!contact || loadingOlder || !hasMoreOlder) return;
+        const oldest = messages[0];
+        if (!oldest) return;
+        setLoadingOlder(true);
+        try {
+            const res = await fetch("/api/telegram/conversation", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    sessionString,
+                    userId: contact.id,
+                    accessHash: contact.accessHash,
+                    limit: 50,
+                    offsetId: Number(oldest.id),
+                }),
+            });
+            const data = await res.json();
+            if (activeChatIdRef.current !== contact.id) return;
+            const older = Array.isArray(data.messages)
+                ? (data.messages as ApiMessage[]).map(toUiMessage)
+                : [];
+            // Fewer than a full page back ⇒ we've reached the start of history.
+            if (older.length < 50) setHasMoreOlder(false);
+            if (older.length > 0) {
+                setMessages((prev) => mergeMessages(prev, older));
+            }
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setLoadingOlder(false);
+        }
+    }
+
+    async function loadConversation(
+        userId: string,
+        accessHash: string,
+        initial: boolean,
+    ) {
+        if (initial) setMessagesLoading(true);
+        try {
+            const res = await fetch("/api/telegram/conversation", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sessionString, userId, accessHash, limit: 100 }),
+            });
+            const data = await res.json();
+            if (activeChatIdRef.current !== userId) return; // switched chats
+            if (Array.isArray(data.messages)) {
+                const incoming = (data.messages as ApiMessage[]).map(toUiMessage);
+                setMessages((prev) => mergeMessages(prev, incoming));
+            }
+        } catch (err) {
+            console.error(err);
+        } finally {
+            if (initial) setMessagesLoading(false);
+        }
+    }
+
+    async function handleSendMessage(text: string) {
+        const contact = selectedContact;
+        if (!contact) return;
+        try {
+            const res = await fetch("/api/telegram/send-message", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    sessionString,
+                    userId: contact.id,
+                    accessHash: contact.accessHash,
+                    text,
+                }),
+            });
+            const data = await res.json();
+            if (data.message && activeChatIdRef.current === contact.id) {
+                setMessages((prev) => mergeMessages(prev, [toUiMessage(data.message)]));
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    // Live updates: poll the open conversation every 3s. The ref keeps the
+    // interval stable while always calling the latest closure.
+    const pollRef = useRef<() => void>(() => {});
+    pollRef.current = () => {
+        if (selectedContact) {
+            void loadConversation(
+                selectedContact.id,
+                selectedContact.accessHash,
+                false,
+            );
+        }
+    };
+    useEffect(() => {
+        const id = selectedContact?.id;
+        if (!id) return;
+        const interval = setInterval(() => pollRef.current(), 3000);
+        return () => clearInterval(interval);
+    }, [selectedContact?.id]);
+
+    async function openChat(contact: Contact) {
+        // optimistically show chat immediately with basic info
+        setSelectedContact({
+            id: contact.id,
+            accessHash: contact.accessHash,
+            firstName: contact.firstName,
+            lastName: contact.lastName,
+            username: contact.username,
+            phone: contact.phone,
+            photo: contact.photo ?? null,
+        });
+        // Reset the conversation and start loading this chat's history.
+        activeChatIdRef.current = contact.id;
+        setMessages([]);
+        setHasMoreOlder(true);
+        setLoadingOlder(false);
+        void loadConversation(contact.id, contact.accessHash, true);
+
+        // fetch full user details (online status, bio, etc.)
+        try {
+            const res = await fetch("/api/telegram/user", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    sessionString,
+                    userId: contact.id,
+                    accessHash: contact.accessHash,
+                }),
+            });
+            const data = await res.json();
+            // Ignore if the user switched chats while this was in flight.
+            if (data.success && activeChatIdRef.current === contact.id) {
+                // The /user response omits accessHash — keep the one we have.
+                setSelectedContact({ ...data.user, accessHash: contact.accessHash });
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    function closeChat() {
+        activeChatIdRef.current = null;
+        setSelectedContact(null);
+        setMessages([]);
+        setHasMoreOlder(true);
+        setLoadingOlder(false);
+    }
+
     function getName(c: Contact) {
         return `${c.firstName || ""} ${c.lastName || ""}`.trim() || "Unknown";
     }
@@ -63,6 +304,48 @@ export default function MyContacts({ sessionString }: { sessionString: string })
     function handleSearch() { setPage(1); setSearch(searchInput); }
     function clearSearch() { setSearchInput(""); setSearch(""); setPage(1); }
 
+    // ── Chat view ──────────────────────────────────────────────────────────────
+    if (selectedContact) {
+        return (
+            <div className="flex flex-col h-full">
+                {/* Breadcrumb */}
+                <div className="flex items-center gap-2 px-4 py-2.5 bg-white border-b border-stone-200 shrink-0">
+                    <button
+                        onClick={closeChat}
+                        className="flex items-center gap-1.5 text-[13px] font-medium text-stone-500 hover:text-indigo-500 transition-colors"
+                    >
+                        <ArrowLeft size={15} />
+                        Contacts
+                    </button>
+                    <span className="text-stone-300 text-sm">/</span>
+                    <span className="text-[13px] font-medium text-stone-800 truncate">
+                        {`${selectedContact.firstName} ${selectedContact.lastName || ""}`.trim()}
+                    </span>
+                </div>
+
+                {/* Chat */}
+                <div className="h-screen flex justify-center">
+                    <div className="w-full max-w-[700px] h-full flex flex-col">
+                        <div className="flex-1 overflow-hidden">
+                            <TelegramChat
+                                //@ts-ignore
+                                contact={selectedContact}
+                                messages={messages}
+                                onSendMessage={handleSendMessage}
+                                isLoading={messagesLoading}
+                                onLoadOlder={loadOlder}
+                                hasMoreOlder={hasMoreOlder}
+                                loadingOlder={loadingOlder}
+                                sessionString={sessionString}
+                            />
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // ── List / Grid view ───────────────────────────────────────────────────────
     return (
         <div className="flex h-full flex-col bg-stone-50">
 
@@ -157,11 +440,10 @@ export default function MyContacts({ sessionString }: { sessionString: string })
                             return (
                                 <div
                                     key={contact.id}
+                                    onClick={() => openChat(contact)}
                                     className="flex items-center gap-3.5 px-6 py-3 hover:bg-white transition-colors cursor-pointer border-b border-stone-100 last:border-0"
                                 >
-                                    <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${gradient} flex items-center justify-center text-white font-semibold text-[15px] shrink-0 shadow-sm`}>
-                                        {name.charAt(0).toUpperCase()}
-                                    </div>
+                                    <ContactAvatar contact={contact} name={name} gradient={gradient} />
                                     <div className="min-w-0 flex-1">
                                         <p className="text-[13.5px] font-medium text-stone-800 truncate leading-tight">
                                             {name}
@@ -184,6 +466,7 @@ export default function MyContacts({ sessionString }: { sessionString: string })
                             return (
                                 <div
                                     key={contact.id}
+                                    onClick={() => openChat(contact)}
                                     className="bg-white border border-stone-200 rounded-2xl p-4 text-center cursor-pointer hover:-translate-y-0.5 hover:shadow-md hover:shadow-stone-200/80 hover:border-stone-300 transition-all duration-150"
                                 >
                                     <div className={`w-14 h-14 rounded-full bg-gradient-to-br ${gradient} flex items-center justify-center text-white font-semibold text-xl mx-auto mb-3 shadow-sm`}>

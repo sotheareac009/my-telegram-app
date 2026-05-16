@@ -1,21 +1,10 @@
 import { createClient } from "@/lib/telegram";
 import { Api } from "telegram";
-import bigInt from "big-integer";
+import { resolveUserPeer } from "@/lib/telegram-peer";
 import type { ChatMessage } from "@/app/api/telegram/conversation/route";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-/** See conversation/route.ts — an explicit InputPeerUser works for anyone. */
-function resolvePeer(userId: string, accessHash?: string) {
-  if (accessHash) {
-    return new Api.InputPeerUser({
-      userId: bigInt(String(userId)),
-      accessHash: bigInt(String(accessHash)),
-    });
-  }
-  return String(userId);
-}
 
 export async function POST(request: Request) {
   const { sessionString, userId, accessHash, text } = await request.json();
@@ -33,7 +22,8 @@ export async function POST(request: Request) {
   const client = createClient(sessionString);
   try {
     await client.connect();
-    const sent = await client.sendMessage(resolvePeer(userId, accessHash), {
+    const peer = await resolveUserPeer(client, userId, accessHash);
+    const sent = await client.sendMessage(peer, {
       message: body,
     });
 

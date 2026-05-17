@@ -20,9 +20,13 @@ type PrivateChat = {
   phone: string;
   lastMessage: string;
   date: number;
+  /** Profile photo as a base64 JPEG data URL, when the user has one. */
+  photo?: string;
 };
 
 const DIALOG_FETCH_LIMIT = 200;
+/** Cap per-photo download so one slow avatar can't stall the whole list. */
+const PHOTO_TIMEOUT_MS = 5000;
 
 export async function POST(request: Request) {
   const { sessionString, page = 1, limit = 30, search = "" } =
@@ -37,6 +41,10 @@ export async function POST(request: Request) {
     const dialogs = await client.getDialogs({ limit: DIALOG_FETCH_LIMIT });
 
     const chats: PrivateChat[] = [];
+    // Keep each user's resolved entity so we can download its profile photo
+    // after pagination — the entity from getDialogs is fully warmed, so the
+    // download works even for non-contacts.
+    const entityById = new Map<string, Api.User>();
     for (const d of dialogs) {
       if (!d.isUser) continue;
       const entity = d.entity;
@@ -44,8 +52,10 @@ export async function POST(request: Request) {
       if (entity.self) continue; // skip "Saved Messages"
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const lastMsg = (d.message as any)?.message;
+      const id = entity.id.toString();
+      entityById.set(id, entity);
       chats.push({
-        id: entity.id.toString(),
+        id,
         accessHash: entity.accessHash ? entity.accessHash.toString() : "0",
         firstName: entity.firstName || "",
         lastName: entity.lastName || "",
@@ -71,9 +81,34 @@ export async function POST(request: Request) {
     const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
     const p = Math.min(totalPages, Math.max(1, Number(page) || 1));
     const start = (p - 1) * pageSize;
+    const pageChats = filtered.slice(start, start + pageSize);
+
+    // Download profile photos for just this page, in parallel. Each is
+    // best-effort and time-boxed so the list never hangs on a slow avatar.
+    await Promise.all(
+      pageChats.map(async (chat) => {
+        const entity = entityById.get(chat.id);
+        // Skip users with no photo set — avoids a pointless download round-trip.
+        if (!entity || !(entity.photo instanceof Api.UserProfilePhoto)) return;
+        try {
+          const buf = (await Promise.race([
+            client.downloadProfilePhoto(entity, { isBig: false }),
+            new Promise<null>((resolve) =>
+              setTimeout(() => resolve(null), PHOTO_TIMEOUT_MS),
+            ),
+          ])) as Buffer | null;
+          if (buf && buf.length > 0) {
+            const b = buf instanceof Buffer ? buf : Buffer.from(buf);
+            chat.photo = `data:image/jpeg;base64,${b.toString("base64")}`;
+          }
+        } catch {
+          // no photo / privacy-restricted — fall back to the gradient initial
+        }
+      }),
+    );
 
     return Response.json({
-      contacts: filtered.slice(start, start + pageSize),
+      contacts: pageChats,
       totalPages,
     });
   } catch (error) {

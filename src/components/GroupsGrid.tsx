@@ -9,6 +9,8 @@ export interface Group {
   unreadCount: number;
   isChannel: boolean;
   isGroup: boolean;
+  /** True for a 1-to-1 private chat. Used as a forward destination only. */
+  isUser?: boolean;
   lastMessage: string;
   date: number;
   folderIds: string[];

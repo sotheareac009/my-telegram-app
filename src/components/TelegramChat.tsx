@@ -1,10 +1,19 @@
 "use client";
 
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { useChatNav, telegramLinkTarget } from "./ChatNavContext";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface ChatMedia {
-    kind: "photo" | "video" | "sticker" | "gif" | "voice" | "audio" | "file";
+    kind:
+        | "photo"
+        | "video"
+        | "sticker"
+        | "gif"
+        | "voice"
+        | "audio"
+        | "file"
+        | "contact";
     /** Inline low-res preview (base64 JPEG data URL). */
     thumb?: string;
     fileName?: string;
@@ -13,6 +22,11 @@ interface ChatMedia {
     duration?: number;
     width?: number;
     height?: number;
+    /** Shared-contact fields (kind === "contact"). */
+    contactUserId?: string;
+    contactFirstName?: string;
+    contactLastName?: string;
+    contactPhone?: string;
 }
 
 interface Message {
@@ -24,6 +38,9 @@ interface Message {
     media?: ChatMedia;
     /** Shared id for messages sent together as one album. */
     groupedId?: string;
+    /** Sender id / name — shown above incoming bubbles in a group chat. */
+    senderId?: string;
+    senderName?: string;
 }
 
 /** A single openable item inside the full-screen media viewer. */
@@ -59,6 +76,25 @@ interface TelegramChatProps {
     loadingOlder?: boolean;
     /** Telegram session — required to build media stream URLs. */
     sessionString?: string;
+    /** Hide the message composer (read-only viewer). */
+    readOnly?: boolean;
+    /** Group/channel stream — show each incoming message's sender name. */
+    isGroup?: boolean;
+    /** Rendered in place of the composer (e.g. a Join button). */
+    banner?: React.ReactNode;
+}
+
+/** Per-sender label colour, deterministic from the sender id. */
+const SENDER_COLORS = [
+    "#e17076", "#7bc862", "#65aadd", "#a695e7",
+    "#ee7aae", "#6ec9cb", "#faa774", "#6a8cda",
+];
+
+function senderColor(id?: string): string {
+    if (!id) return SENDER_COLORS[0];
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = id.charCodeAt(i) + ((h << 5) - h);
+    return SENDER_COLORS[Math.abs(h) % SENDER_COLORS.length];
 }
 
 /** Build a chat-media stream URL for a message attachment. */
@@ -66,14 +102,20 @@ function buildMediaUrl(
     sessionString: string,
     contact: Contact,
     messageId: string,
+    isGroup: boolean,
     opts?: { download?: boolean; thumb?: boolean },
 ): string {
     const params = new URLSearchParams({
         sessionString,
-        userId: contact.id,
         messageId: String(messageId),
     });
-    if (contact.accessHash) params.set("accessHash", contact.accessHash);
+    if (isGroup) {
+        // contact.id is the group/channel marked id in group mode.
+        params.set("chatId", contact.id);
+    } else {
+        params.set("userId", contact.id);
+        if (contact.accessHash) params.set("accessHash", contact.accessHash);
+    }
     if (opts?.download) params.set("download", "1");
     if (opts?.thumb) params.set("thumb", "1");
     return `/api/telegram/chat-media?${params.toString()}`;
@@ -397,6 +439,10 @@ function MediaContent({
         );
     }
 
+    if (media.kind === "contact") {
+        return <ContactCard media={media} />;
+    }
+
     // file / document
     return (
         <a
@@ -423,15 +469,119 @@ function MediaContent({
     );
 }
 
+// ── Shared-contact card ────────────────────────────────────────────────────────
+function ContactCard({ media }: { media: ChatMedia }) {
+    const nav = useChatNav();
+    const name =
+        `${media.contactFirstName || ""} ${media.contactLastName || ""}`.trim() ||
+        "Contact";
+    const canOpen = !!nav && !!media.contactUserId;
+    return (
+        <button
+            type="button"
+            disabled={!canOpen}
+            onClick={() => {
+                if (nav && media.contactUserId) {
+                    nav.openUserChat({
+                        id: media.contactUserId,
+                        firstName: media.contactFirstName || name,
+                        lastName: media.contactLastName,
+                    });
+                }
+            }}
+            className="flex items-center gap-3 py-1 text-left enabled:cursor-pointer disabled:cursor-default"
+        >
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-500 text-base font-semibold text-white">
+                {name.charAt(0).toUpperCase()}
+            </span>
+            <span className="min-w-0">
+                <span className="block truncate text-[13.5px] font-semibold text-[#111]">
+                    {name}
+                </span>
+                <span className="block truncate text-[11.5px] text-[#3390ec]">
+                    {media.contactPhone || (canOpen ? "Open chat" : "Contact")}
+                </span>
+            </span>
+        </button>
+    );
+}
+
+// ── Message text with clickable links ──────────────────────────────────────────
+function MessageText({ text }: { text: string }) {
+    const nav = useChatNav();
+    if (!text) return null;
+
+    // Fresh regex per call — a /g regex carries mutable lastIndex state.
+    const linkRe = /(https?:\/\/[^\s<]+|t\.me\/[^\s<]+|www\.[^\s<]+)/gi;
+    const out: React.ReactNode[] = [];
+    let last = 0;
+    let key = 0;
+    let m: RegExpExecArray | null;
+    while ((m = linkRe.exec(text)) !== null) {
+        if (m.index > last) out.push(text.slice(last, m.index));
+        const raw = m[0];
+        // Trailing sentence punctuation isn't part of the URL.
+        const clean = raw.replace(/[.,!?;:)]+$/, "");
+        const trailing = raw.slice(clean.length);
+        const tgTarget = telegramLinkTarget(clean);
+        if (tgTarget && nav) {
+            // Telegram link (public username or private invite) — resolve and
+            // open inside the app.
+            out.push(
+                <button
+                    key={key++}
+                    type="button"
+                    onClick={() => nav.openTelegramLink(clean)}
+                    className="cursor-pointer break-all text-[#3390ec] underline hover:no-underline"
+                >
+                    {clean}
+                </button>,
+            );
+        } else {
+            const href = clean.startsWith("http") ? clean : `https://${clean}`;
+            out.push(
+                <a
+                    key={key++}
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="break-all text-[#3390ec] underline hover:no-underline"
+                >
+                    {clean}
+                </a>,
+            );
+        }
+        if (trailing) out.push(trailing);
+        last = m.index + raw.length;
+    }
+    if (last < text.length) out.push(text.slice(last));
+    return <>{out}</>;
+}
+
+// ── Sender label (group chat) ──────────────────────────────────────────────────
+function SenderLabel({ msg }: { msg: Message }) {
+    if (!msg.senderName) return null;
+    return (
+        <span
+            className="mb-0.5 block px-1 text-[12px] font-semibold leading-tight"
+            style={{ color: senderColor(msg.senderId) }}
+        >
+            {msg.senderName}
+        </span>
+    );
+}
+
 // ── Album bubble (grouped media → tiled grid) ──────────────────────────────────
 function AlbumBubble({
     messages,
     mediaUrl,
     onOpenViewer,
+    isGroup = false,
 }: {
     messages: Message[];
     mediaUrl: MediaUrlFn;
     onOpenViewer: (items: ViewerItem[], index: number) => void;
+    isGroup?: boolean;
 }) {
     const fromMe = messages[0].fromMe;
     const last = messages[messages.length - 1];
@@ -457,6 +607,11 @@ function AlbumBubble({
                         : "bg-white rounded-bl-sm"
                 }`}
             >
+                {isGroup && !fromMe && (
+                    <span className="px-1 pt-0.5">
+                        <SenderLabel msg={messages[0]} />
+                    </span>
+                )}
                 <div
                     className="grid gap-0.5 overflow-hidden rounded-lg"
                     style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}
@@ -498,7 +653,7 @@ function AlbumBubble({
                 </div>
                 {caption && (
                     <span className="mt-1 block px-2 pb-0.5" style={{ wordBreak: "break-word" }}>
-                        {caption}
+                        <MessageText text={caption} />
                     </span>
                 )}
                 <span className="block px-2 pb-1 text-right text-[10px] leading-none text-[#aab8c2] select-none">
@@ -515,12 +670,15 @@ function Bubble({
     msg,
     mediaUrl,
     onOpenViewer,
+    isGroup = false,
 }: {
     msg: Message;
     mediaUrl: MediaUrlFn;
     onOpenViewer: (items: ViewerItem[], index: number) => void;
+    isGroup?: boolean;
 }) {
     const media = msg.media;
+    const showSender = isGroup && !msg.fromMe && !!msg.senderName;
     const metaRow = (
         <span className="ml-2 whitespace-nowrap text-[10px] leading-none text-[#aab8c2] select-none">
             {media?.kind === "video" || media?.kind === "voice" || media?.kind === "audio"
@@ -576,6 +734,11 @@ function Bubble({
                 `}
                 style={{ wordBreak: "break-word" }}
             >
+                {showSender && (
+                    <span className={isVisualMedia ? "block px-1 pt-0.5" : ""}>
+                        <SenderLabel msg={msg} />
+                    </span>
+                )}
                 {media && (
                     <div className={isVisualMedia ? "relative" : ""}>
                         <MediaContent
@@ -596,7 +759,7 @@ function Bubble({
                 )}
                 {msg.text && (
                     <span className={isVisualMedia ? "mt-1 block px-2 pb-1" : ""}>
-                        {msg.text}
+                        <MessageText text={msg.text} />
                     </span>
                 )}
                 {(!isVisualMedia || msg.text) && (
@@ -766,9 +929,12 @@ export default function TelegramChat({
     hasMoreOlder = false,
     loadingOlder = false,
     sessionString = "",
+    readOnly = false,
+    isGroup = false,
+    banner,
 }: TelegramChatProps) {
     const mediaUrl: MediaUrlFn = (messageId, opts) =>
-        buildMediaUrl(sessionString, contact, messageId, opts);
+        buildMediaUrl(sessionString, contact, messageId, isGroup, opts);
     const [input, setInput] = useState("");
     const [isTyping, setIsTyping] = useState(false);
     // Full-screen media viewer state — null when closed.
@@ -976,6 +1142,7 @@ export default function TelegramChat({
                                             messages={unit}
                                             mediaUrl={mediaUrl}
                                             onOpenViewer={openViewer}
+                                            isGroup={isGroup}
                                         />
                                     ) : (
                                         <Bubble
@@ -983,6 +1150,7 @@ export default function TelegramChat({
                                             msg={unit}
                                             mediaUrl={mediaUrl}
                                             onOpenViewer={openViewer}
+                                            isGroup={isGroup}
                                         />
                                     ),
                                 )}
@@ -1007,7 +1175,13 @@ export default function TelegramChat({
                 />
             )}
 
-            {/* ── Input Bar ── */}
+            {/* ── Banner (Join button etc.) — replaces the composer ── */}
+            {banner ? (
+                <div className="shrink-0 border-t border-gray-200 bg-white px-3 py-2.5">
+                    {banner}
+                </div>
+            ) : readOnly ? null : (
+            /* ── Input Bar ── */
             <div className="shrink-0 px-3 py-2 bg-white border-t border-gray-200 flex items-end gap-2">
                 {/* emoji button */}
                 <button className="text-[#8a9aaa] hover:text-[#3390ec] transition-colors p-2 rounded-full hover:bg-[#3390ec]/10 shrink-0 mb-0.5">
@@ -1066,6 +1240,7 @@ export default function TelegramChat({
                     )}
                 </button>
             </div>
+            )}
         </div>
     );
 }

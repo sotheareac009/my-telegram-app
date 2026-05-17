@@ -8,6 +8,8 @@ export interface ForwardDestination {
   title: string;
   isChannel: boolean;
   isGroup: boolean;
+  /** True for a 1-to-1 private chat. */
+  isUser?: boolean;
 }
 
 /** Progress snapshot for the download→resend fallback used on restricted chats. */
@@ -116,9 +118,76 @@ export default function ForwardModal({
   const groupedDestinations = useMemo(() => {
     return {
       groups: filteredDestinations.filter((destination) => destination.isGroup),
-      channels: filteredDestinations.filter((destination) => destination.isChannel),
+      channels: filteredDestinations.filter(
+        (destination) => destination.isChannel,
+      ),
+      privateChats: filteredDestinations.filter(
+        (destination) => destination.isUser,
+      ),
     };
   }, [filteredDestinations]);
+
+  /** Render one labelled section of destination rows. */
+  function renderSection(
+    label: string,
+    items: ForwardDestination[],
+    fallbackClassName: string,
+    typeLabel: string,
+  ) {
+    if (items.length === 0) return null;
+    return (
+      <div className="space-y-2">
+        <div className="px-4 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+          {label}
+        </div>
+        <ul className="space-y-2">
+          {items.map((destination) => (
+            <li key={destination.id}>
+              <button
+                type="button"
+                onClick={() => onSelectDestination(destination.id)}
+                disabled={loading}
+                className="flex w-full items-center justify-between rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-left transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-blue-800"
+              >
+                <div className="flex items-center gap-3">
+                  <DialogAvatar
+                    session={session}
+                    groupId={destination.id}
+                    title={destination.title}
+                    fallbackClassName={fallbackClassName}
+                  />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                      {destination.title}
+                    </p>
+                    <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      {typeLabel}
+                    </p>
+                  </div>
+                </div>
+                {inProgressDestinationIds?.has(destination.id) ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                    Forwarding…
+                  </span>
+                ) : (
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                      isRestricted
+                        ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+                        : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                    }`}
+                  >
+                    {isRestricted ? "Re-upload" : "Forward"}
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -137,7 +206,7 @@ export default function ForwardModal({
               Forward to another chat
             </h2>
             <p className="mt-0.5 text-xs text-zinc-500">
-              Choose a group or channel destination for the selected media.
+              Choose a group, channel or private chat for the selected media.
             </p>
           </div>
           <button
@@ -286,116 +355,34 @@ export default function ForwardModal({
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search groups or channels…"
+            placeholder="Search groups, channels or chats…"
             className="p-[1rem] mb-4 h-10 w-full rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 outline-none transition-colors focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-500/15 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-blue-400 dark:focus:bg-zinc-900"
           />
 
           <div className="min-h-0 flex-1 overflow-y-auto rounded-3xl border border-zinc-200 bg-zinc-50 p-2 dark:border-zinc-800 dark:bg-zinc-950/70">
             {filteredDestinations.length === 0 ? (
               <div className="py-16 text-center text-sm text-zinc-500">
-                No other groups or channels match your search.
+                No chats match your search.
               </div>
             ) : (
               <div className="space-y-4">
-                {groupedDestinations.channels.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="px-4 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                      Channels
-                    </div>
-                    <ul className="space-y-2">
-                      {groupedDestinations.channels.map((destination) => (
-                        <li key={destination.id}>
-                          <button
-                            type="button"
-                            onClick={() => onSelectDestination(destination.id)}
-                            disabled={loading}
-                            className="flex w-full items-center justify-between rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-left transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-blue-800"
-                          >
-                            <div className="flex items-center gap-3">
-                              <DialogAvatar
-                                session={session}
-                                groupId={destination.id}
-                                title={destination.title}
-                                fallbackClassName="from-violet-500 to-pink-500"
-                              />
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                                  {destination.title}
-                                </p>
-                                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                                  Channel
-                                </p>
-                              </div>
-                            </div>
-                            {inProgressDestinationIds?.has(destination.id) ? (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-                                Forwarding…
-                              </span>
-                            ) : (
-                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                isRestricted
-                                  ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
-                                  : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
-                              }`}>
-                                {isRestricted ? "Re-upload" : "Forward"}
-                              </span>
-                            )}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                {renderSection(
+                  "Channels",
+                  groupedDestinations.channels,
+                  "from-violet-500 to-pink-500",
+                  "Channel",
                 )}
-                {groupedDestinations.groups.length > 0 && (
-                  <div className="space-y-2">
-                    <div className="px-4 text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                      Groups
-                    </div>
-                    <ul className="space-y-2">
-                      {groupedDestinations.groups.map((destination) => (
-                        <li key={destination.id}>
-                          <button
-                            type="button"
-                            onClick={() => onSelectDestination(destination.id)}
-                            disabled={loading}
-                            className="flex w-full items-center justify-between rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-left transition-colors hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-blue-800"
-                          >
-                            <div className="flex items-center gap-3">
-                              <DialogAvatar
-                                session={session}
-                                groupId={destination.id}
-                                title={destination.title}
-                                fallbackClassName="from-blue-500 to-cyan-500"
-                              />
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                                  {destination.title}
-                                </p>
-                                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                                  Group
-                                </p>
-                              </div>
-                            </div>
-                            {inProgressDestinationIds?.has(destination.id) ? (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-                                Forwarding…
-                              </span>
-                            ) : (
-                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                isRestricted
-                                  ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
-                                  : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
-                              }`}>
-                                {isRestricted ? "Re-upload" : "Forward"}
-                              </span>
-                            )}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+                {renderSection(
+                  "Groups",
+                  groupedDestinations.groups,
+                  "from-blue-500 to-cyan-500",
+                  "Group",
+                )}
+                {renderSection(
+                  "Private chats",
+                  groupedDestinations.privateChats,
+                  "from-emerald-500 to-teal-500",
+                  "Private chat",
                 )}
               </div>
             )}

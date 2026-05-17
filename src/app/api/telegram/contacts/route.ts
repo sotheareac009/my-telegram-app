@@ -3,6 +3,9 @@
 import { createClient } from "@/lib/telegram";
 import { Api } from "telegram";
 
+/** Cap per-photo download so one slow avatar can't stall the whole list. */
+const PHOTO_TIMEOUT_MS = 5000;
+
 export async function POST(request: Request) {
     try {
         const body = await request.json();
@@ -30,17 +33,26 @@ export async function POST(request: Request) {
                     hash: BigInt(0),
                 })
             );
+            // Keep each user's resolved entity so we can download its profile
+            // photo after pagination.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const entityById = new Map<string, any>();
             //@ts-ignore
-            let contacts = result.users.map((user: any) => ({
-                id: user.id?.toString(),
-                // accessHash is the per-user security token the conversation /
-                // send-message routes need to address this user.
-                accessHash: user.accessHash ? user.accessHash.toString() : "0",
-                firstName: user.firstName || "",
-                lastName: user.lastName || "",
-                username: user.username || "",
-                phone: user.phone || "",
-            }));
+            let contacts = result.users.map((user: any) => {
+                const id = user.id?.toString();
+                if (id) entityById.set(id, user);
+                return {
+                    id,
+                    // accessHash is the per-user security token the conversation /
+                    // send-message routes need to address this user.
+                    accessHash: user.accessHash ? user.accessHash.toString() : "0",
+                    firstName: user.firstName || "",
+                    lastName: user.lastName || "",
+                    username: user.username || "",
+                    phone: user.phone || "",
+                    photo: undefined as string | undefined,
+                };
+            });
 
             // search
             if (search) {
@@ -64,6 +76,36 @@ export async function POST(request: Request) {
             const end = start + limit;
 
             const paginatedContacts = contacts.slice(start, end);
+
+            // Download profile photos for just this page, in parallel. Each is
+            // best-effort and time-boxed so the list never hangs on a slow one.
+            await Promise.all(
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                paginatedContacts.map(async (contact: any) => {
+                    const entity = entityById.get(contact.id);
+                    if (
+                        !entity ||
+                        !(entity.photo instanceof Api.UserProfilePhoto)
+                    ) {
+                        return;
+                    }
+                    try {
+                        const buf = (await Promise.race([
+                            client.downloadProfilePhoto(entity, { isBig: false }),
+                            new Promise<null>((resolve) =>
+                                setTimeout(() => resolve(null), PHOTO_TIMEOUT_MS),
+                            ),
+                        ])) as Buffer | null;
+                        if (buf && buf.length > 0) {
+                            const b =
+                                buf instanceof Buffer ? buf : Buffer.from(buf);
+                            contact.photo = `data:image/jpeg;base64,${b.toString("base64")}`;
+                        }
+                    } catch {
+                        // no photo / privacy-restricted — gradient fallback
+                    }
+                }),
+            );
 
             return Response.json({
                 success: true,

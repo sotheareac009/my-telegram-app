@@ -7,7 +7,15 @@ export const dynamic = "force-dynamic";
 
 /** Media attached to a chat message, classified for the UI to render. */
 export type ChatMedia = {
-  kind: "photo" | "video" | "sticker" | "gif" | "voice" | "audio" | "file";
+  kind:
+    | "photo"
+    | "video"
+    | "sticker"
+    | "gif"
+    | "voice"
+    | "audio"
+    | "file"
+    | "contact";
   /** Inline low-res preview (base64 JPEG data URL) — shows instantly. */
   thumb?: string;
   fileName?: string;
@@ -17,6 +25,11 @@ export type ChatMedia = {
   duration?: number;
   width?: number;
   height?: number;
+  /** Shared-contact fields (kind === "contact"). */
+  contactUserId?: string;
+  contactFirstName?: string;
+  contactLastName?: string;
+  contactPhone?: string;
 };
 
 export type ChatMessage = {
@@ -28,6 +41,10 @@ export type ChatMessage = {
   media?: ChatMedia;
   /** Shared id for messages sent together as one album (grouped media). */
   groupedId?: string;
+  /** Sender id — set for group/channel messages so the UI can label them. */
+  senderId?: string;
+  /** Sender display name — set for group/channel messages. */
+  senderName?: string;
 };
 
 /** Decode a Telegram stripped thumbnail into an inline JPEG data URL. */
@@ -44,6 +61,16 @@ function strippedToDataUrl(
 
 /** Classify a message's media into a UI-friendly shape. */
 function classifyMedia(media: Api.TypeMessageMedia): ChatMedia | null {
+  if (media instanceof Api.MessageMediaContact) {
+    return {
+      kind: "contact",
+      contactUserId: media.userId ? media.userId.toString() : undefined,
+      contactFirstName: media.firstName || "",
+      contactLastName: media.lastName || "",
+      contactPhone: media.phoneNumber || "",
+    };
+  }
+
   if (media instanceof Api.MessageMediaPhoto) {
     const photo = media.photo;
     let thumb: string | undefined;
@@ -127,16 +154,40 @@ function classifyMedia(media: Api.TypeMessageMedia): ChatMedia | null {
   return null;
 }
 
+/** Extract the sender id + display name from a group/channel message. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractSender(msg: any): { id?: string; name?: string } {
+  const from = msg.fromId;
+  let id: string | undefined;
+  if (from instanceof Api.PeerUser) id = from.userId.toString();
+  else if (from instanceof Api.PeerChannel) id = from.channelId.toString();
+  else if (from instanceof Api.PeerChat) id = from.chatId.toString();
+  // GramJS attaches the resolved entity as `_sender` after getMessages.
+  const sender = msg._sender;
+  let name = "";
+  if (sender) {
+    if (sender.firstName || sender.lastName) {
+      name = `${sender.firstName || ""} ${sender.lastName || ""}`.trim();
+    } else if (sender.title) {
+      name = sender.title;
+    }
+  }
+  return { id, name: name || undefined };
+}
+
 /** Map a GramJS message to the client-facing shape. */
 function mapMessage(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   msg: any,
   readOutboxMaxId: number,
+  isGroup: boolean,
 ): ChatMessage | null {
   if (!(msg instanceof Api.Message)) return null;
   const text: string = msg.message || "";
   const fromMe = Boolean(msg.out);
   const media = msg.media ? classifyMedia(msg.media) : null;
+  // Sender labelling is only relevant for group/channel streams.
+  const sender = isGroup && !fromMe ? extractSender(msg) : {};
   return {
     id: msg.id,
     text,
@@ -147,29 +198,37 @@ function mapMessage(
     status: fromMe ? (msg.id <= readOutboxMaxId ? "read" : "sent") : undefined,
     media: media ?? undefined,
     groupedId: msg.groupedId ? msg.groupedId.toString() : undefined,
+    senderId: sender.id,
+    senderName: sender.name,
   };
 }
 
 export async function POST(request: Request) {
-  const { sessionString, userId, accessHash, limit, offsetId } =
+  const { sessionString, userId, accessHash, chatId, limit, offsetId } =
     await request.json();
   if (typeof sessionString !== "string" || !sessionString) {
     return Response.json({ error: "Missing sessionString" }, { status: 400 });
   }
-  if (!userId) {
-    return Response.json({ error: "Missing userId" }, { status: 400 });
+  // Either a 1-to-1 user chat (userId) or a group/channel stream (chatId).
+  const isGroup = !!chatId;
+  if (!userId && !chatId) {
+    return Response.json({ error: "Missing chat target" }, { status: 400 });
   }
 
   const client = createClient(sessionString);
   try {
     await client.connect();
 
-    const peer = await resolveUserPeer(client, userId, accessHash);
+    // For a group/channel the marked id resolves directly; for a user we build
+    // an explicit InputPeerUser so it works on a cold client.
+    const peer = isGroup
+      ? String(chatId)
+      : await resolveUserPeer(client, userId, accessHash);
 
     // Read state — the highest outgoing message id the peer has read. Used to
-    // mark our own messages as "seen". Best-effort: skip silently on failure.
+    // mark our own messages as "seen". Best-effort; user chats only.
     let readOutboxMaxId = 0;
-    if (peer instanceof Api.InputPeerUser) {
+    if (!isGroup && peer instanceof Api.InputPeerUser) {
       try {
         const res = await client.invoke(
           new Api.messages.GetPeerDialogs({
@@ -198,7 +257,7 @@ export async function POST(request: Request) {
     // getMessages returns newest-first; reverse for chronological display.
     const mapped: ChatMessage[] = [];
     for (let i = messages.length - 1; i >= 0; i--) {
-      const m = mapMessage(messages[i], readOutboxMaxId);
+      const m = mapMessage(messages[i], readOutboxMaxId, isGroup);
       if (m) mapped.push(m);
     }
 

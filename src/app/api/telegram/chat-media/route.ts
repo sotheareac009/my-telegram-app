@@ -77,14 +77,17 @@ function pickThumbSize(
  */
 async function streamThumbnail(
   sessionString: string,
-  userId: string,
+  userId: string | null,
   accessHash: string | null,
+  chatId: string | null,
   messageId: number,
 ): Promise<Response> {
   const client = createClient(sessionString);
   await client.connect();
   try {
-    const peer = await resolveUserPeer(client, userId, accessHash);
+    const peer = chatId
+      ? String(chatId)
+      : await resolveUserPeer(client, userId ?? "", accessHash);
     const messages = await client.getMessages(peer, { ids: [messageId] });
     const msg = messages[0];
     if (!msg || !msg.media) {
@@ -117,8 +120,9 @@ async function streamThumbnail(
 
 async function streamChatMedia(
   sessionString: string,
-  userId: string,
+  userId: string | null,
   accessHash: string | null,
+  chatId: string | null,
   messageId: number,
   mode: "inline" | "attachment",
   rangeHeader: string | null,
@@ -138,7 +142,11 @@ async function streamChatMedia(
   };
 
   try {
-    const peer = await resolveUserPeer(client, userId, accessHash);
+    // A group/channel marked id resolves directly; a user needs an explicit
+    // InputPeerUser built from its accessHash.
+    const peer = chatId
+      ? String(chatId)
+      : await resolveUserPeer(client, userId ?? "", accessHash);
     const messages = await client.getMessages(peer, { ids: [messageId] });
     const msg = messages[0];
     if (!msg || !msg.media) {
@@ -254,23 +262,31 @@ export async function GET(request: Request) {
     const sessionString = searchParams.get("sessionString");
     const userId = searchParams.get("userId");
     const accessHash = searchParams.get("accessHash");
+    const chatId = searchParams.get("chatId");
     const messageId = Number(searchParams.get("messageId"));
     const mode =
       searchParams.get("download") === "1" ? "attachment" : "inline";
 
-    if (!sessionString || !userId || !messageId) {
+    if (!sessionString || (!userId && !chatId) || !messageId) {
       return Response.json({ error: "Missing params" }, { status: 400 });
     }
 
     // ?thumb=1 → serve the sharp poster thumbnail instead of the full media.
     if (searchParams.get("thumb") === "1") {
-      return await streamThumbnail(sessionString, userId, accessHash, messageId);
+      return await streamThumbnail(
+        sessionString,
+        userId,
+        accessHash,
+        chatId,
+        messageId,
+      );
     }
 
     return await streamChatMedia(
       sessionString,
       userId,
       accessHash,
+      chatId,
       messageId,
       mode,
       request.headers.get("range"),

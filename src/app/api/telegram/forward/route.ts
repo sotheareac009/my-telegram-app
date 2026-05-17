@@ -687,6 +687,18 @@ export async function POST(request: Request) {
       client = createClient(sessionString);
       await client.connect();
 
+      // Warm the entity cache. Each request opens a fresh client with an empty
+      // cache; channels resolve via a 0-accessHash special-case and contacts
+      // resolve too, but a non-contact private chat would otherwise fail with
+      // "Could not find the input entity". getDialogs caches every dialog's
+      // peer + accessHash so any destination — including private chats —
+      // resolves. Best-effort: a failure just leaves resolution as before.
+      try {
+        await client.getDialogs({ limit: 200 });
+      } catch {
+        // ignore — proceed without the warm-up
+      }
+
       emit({ type: "start", total: parsedMessageIds.length });
 
       // ── Step 1: Try the fast native forward ──────────────────────────

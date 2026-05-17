@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { LayoutGrid, List, ChevronLeft, ChevronRight, Search, X, ArrowLeft } from "lucide-react";
 import TelegramChat from "./TelegramChat";
 import type { ChatMedia } from "@/app/api/telegram/conversation/route";
+import type { ChatNavUser } from "./ChatNavContext";
 
 type Contact = {
     id: string;
@@ -106,7 +107,16 @@ function ContactAvatar({ contact, name, gradient }: { contact: Contact; name: st
     );
 }
 
-export default function MyContacts({ sessionString }: { sessionString: string }) {
+export default function MyContacts({
+    sessionString,
+    initialChat,
+    onInitialChatConsumed,
+}: {
+    sessionString: string;
+    /** When set, MyContacts opens this conversation on mount (link / contact share). */
+    initialChat?: ChatNavUser | null;
+    onInitialChatConsumed?: () => void;
+}) {
     const [contacts, setContacts] = useState<Contact[]>([]);
     const [loading, setLoading] = useState(true);
     const [view, setView] = useState<"list" | "grid">("list");
@@ -296,6 +306,22 @@ export default function MyContacts({ sessionString }: { sessionString: string })
         setHasMoreOlder(true);
         setLoadingOlder(false);
     }
+
+    // Open a conversation requested from outside (a t.me/<user> link or a
+    // contact share). Fires once per distinct user id.
+    useEffect(() => {
+        if (!initialChat) return;
+        void openChat({
+            id: initialChat.id,
+            accessHash: initialChat.accessHash || "0",
+            firstName: initialChat.firstName,
+            lastName: initialChat.lastName || "",
+            username: "",
+            phone: "",
+        });
+        onInitialChatConsumed?.();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialChat?.id]);
 
     function getName(c: Contact) {
         return `${c.firstName || ""} ${c.lastName || ""}`.trim() || "Unknown";

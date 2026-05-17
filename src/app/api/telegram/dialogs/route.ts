@@ -145,8 +145,12 @@ export async function POST(request: Request) {
       folderMatches.set("archive", archivedIds);
     }
 
+    // Include private chats (users) alongside groups & channels — they are
+    // valid forward destinations. The grids filter by isGroup/isChannel, so
+    // users never leak into the Groups/Channels lists; only the forward
+    // picker (which lists every destination) surfaces them.
     const groups = dialogs
-      .filter((d) => d.isGroup || d.isChannel)
+      .filter((d) => d.isGroup || d.isChannel || d.isUser)
       .map((d) => {
         const id = d.id?.toString() ?? "";
         return {
@@ -155,6 +159,7 @@ export async function POST(request: Request) {
           unreadCount: d.unreadCount ?? 0,
           isChannel: d.isChannel ?? false,
           isGroup: d.isGroup ?? false,
+          isUser: d.isUser ?? false,
           lastMessage: d.message?.message?.slice(0, 80) ?? "",
           date: d.message?.date ?? 0,
           folderIds: [...folderMatches.entries()]

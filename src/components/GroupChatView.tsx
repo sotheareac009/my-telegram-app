@@ -163,6 +163,27 @@ export default function GroupChatView({
     return () => clearInterval(interval);
   }, [chatId]);
 
+  // Send a message into the group/channel. Only reachable once `member` is
+  // true (the composer is hidden otherwise). The optimistic message returned
+  // by the API is merged in; the 5s poll reconciles anything that diverges.
+  async function handleSend(text: string) {
+    const id = chatId;
+    if (!id) return;
+    try {
+      const res = await fetch("/api/telegram/send-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionString, chatId: id, text }),
+      });
+      const data = await res.json();
+      if (data.message && activeRef.current === id) {
+        setMessages((prev) => merge(prev, [toUi(data.message)]));
+      }
+    } catch {
+      // ignore — the poll will pick the message up if it actually sent
+    }
+  }
+
   async function handleJoin() {
     setJoining(true);
     setJoinError(null);
@@ -195,17 +216,40 @@ export default function GroupChatView({
   const isChannel = target.kind === "channel" || target.isChannel === true;
 
   const joinBanner = (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-2">
       <button
         type="button"
         onClick={handleJoin}
         disabled={joining}
-        className="w-full rounded-xl bg-[#3390ec] py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#2b7fd4] disabled:opacity-60"
+        className="group flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 py-3 text-sm font-semibold text-white shadow-lg shadow-blue-500/25 transition-all hover:-translate-y-0.5 hover:shadow-blue-500/40 disabled:translate-y-0 disabled:opacity-60 disabled:shadow-none"
       >
-        {joining ? "Joining…" : `Join ${isChannel ? "Channel" : "Group"}`}
+        {joining ? (
+          <>
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+            Joining…
+          </>
+        ) : (
+          <>
+            Join {isChannel ? "Channel" : "Group"}
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="transition-transform group-hover:translate-x-0.5"
+            >
+              <line x1="5" y1="12" x2="19" y2="12" />
+              <polyline points="12 5 19 12 12 19" />
+            </svg>
+          </>
+        )}
       </button>
       {joinError && (
-        <span className="text-center text-[11px] text-red-500">
+        <span className="text-center text-[11px] font-medium text-red-500">
           {joinError}
         </span>
       )}
@@ -215,53 +259,74 @@ export default function GroupChatView({
   // ── Preview mode — private invite, not a member, no readable history ──
   if (!chatId) {
     return (
-     <div className="flex h-full justify-center bg-stone-100 dark:bg-zinc-900">
-      <div className="flex h-full w-full max-w-[700px] flex-col bg-[#f0f2f5] shadow-sm">
-        <div className="flex items-center gap-2 border-b border-gray-200 bg-white px-4 py-2.5">
-          <button
-            onClick={onClose}
-            className="text-[#8a9aaa] transition-colors hover:text-[#3390ec]"
-            aria-label="Back"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <path d="M15 18l-6-6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-          <span className="truncate text-[13px] font-medium text-stone-800">
-            {target.title}
-          </span>
+      <div className="relative flex h-full justify-center overflow-hidden bg-gradient-to-b from-white via-blue-50/40 to-cyan-50/30 dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950">
+        {/* Background orbs */}
+        <div className="pointer-events-none absolute inset-0 -z-10">
+          <div className="absolute -top-32 left-1/2 h-[420px] w-[640px] -translate-x-1/2 rounded-full bg-blue-300/30 blur-[120px] dark:bg-blue-500/10" />
+          <div className="absolute bottom-0 right-0 h-80 w-80 rounded-full bg-cyan-300/25 blur-[100px] dark:bg-cyan-500/10" />
         </div>
-        <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8">
-          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-cyan-400 text-3xl font-bold text-white shadow-lg">
-            {target.title.charAt(0).toUpperCase()}
-          </div>
-          <div className="text-center">
-            <h2 className="text-lg font-semibold text-stone-900">
+        <div className="flex h-full w-full max-w-[700px] flex-col">
+          {/* Header */}
+          <div className="flex items-center gap-2 border-b border-zinc-200/70 bg-white/70 px-4 py-3 backdrop-blur-md dark:border-zinc-800/70 dark:bg-zinc-900/60">
+            <button
+              onClick={onClose}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-blue-600 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-blue-400"
+              aria-label="Back"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M15 18l-6-6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <span className="truncate text-sm font-semibold text-zinc-800 dark:text-zinc-100">
               {target.title}
-            </h2>
-            {!!target.participants && (
-              <p className="text-sm text-stone-500">
-                {target.participants.toLocaleString()}{" "}
-                {isChannel ? "subscribers" : "members"}
-              </p>
-            )}
-            {target.about && (
-              <p className="mt-2 max-w-sm text-sm leading-relaxed text-stone-600">
-                {target.about}
-              </p>
-            )}
+            </span>
           </div>
-          <div className="w-full max-w-xs">{joinBanner}</div>
+          {/* Body */}
+          <div className="flex flex-1 items-center justify-center p-6">
+            <div className="w-full max-w-sm rounded-3xl border border-zinc-200/80 bg-white/80 p-8 text-center shadow-xl shadow-blue-500/10 backdrop-blur-xl dark:border-zinc-800/80 dark:bg-zinc-900/80 dark:shadow-black/30">
+              {/* Avatar with glow */}
+              <div className="relative mx-auto w-fit">
+                <div className="flex h-24 w-24 items-center justify-center rounded-3xl bg-gradient-to-br from-blue-500 to-cyan-400 text-4xl font-bold text-white shadow-lg shadow-blue-500/30">
+                  {target.title.charAt(0).toUpperCase()}
+                </div>
+                <div className="absolute inset-0 -z-10 rounded-3xl bg-gradient-to-br from-blue-500 to-cyan-400 opacity-30 blur-xl" />
+              </div>
+              <h2 className="mt-5 text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+                {target.title}
+              </h2>
+              {!!target.participants && (
+                <div className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white/70 px-3 py-1 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800/70 dark:text-zinc-300">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  {target.participants.toLocaleString()}{" "}
+                  {isChannel ? "subscribers" : "members"}
+                </div>
+              )}
+              {target.about && (
+                <p className="mt-4 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
+                  {target.about}
+                </p>
+              )}
+              <div className="mt-6">{joinBanner}</div>
+              <p className="mt-3 text-[11px] text-zinc-400 dark:text-zinc-500">
+                You&apos;re previewing this {isChannel ? "channel" : "group"}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
-     </div>
     );
   }
 
-  // ── Chat mode — render the message stream (read-only viewer) ──
+  // ── Chat mode — render the message stream ──
+  // Members get a live composer; non-members see the Join banner instead and
+  // the stream stays read-only until they join.
   return (
-    <div className="flex h-full justify-center bg-stone-100 dark:bg-zinc-900">
-      <div className="flex h-full w-full max-w-[700px] flex-col shadow-sm">
+    <div className="relative flex h-full justify-center overflow-hidden bg-gradient-to-b from-zinc-100 via-blue-50/40 to-zinc-100 dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950">
+      {/* Soft background glow behind the chat panel */}
+      <div className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute -top-24 left-1/2 h-72 w-[640px] -translate-x-1/2 rounded-full bg-blue-300/20 blur-[120px] dark:bg-blue-500/10" />
+      </div>
+      <div className="flex h-full w-full max-w-[700px] flex-col overflow-hidden shadow-xl shadow-blue-500/5 ring-1 ring-black/5 dark:shadow-black/30 dark:ring-white/5">
         <TelegramChat
           contact={{
             id: chatId,
@@ -269,14 +334,14 @@ export default function GroupChatView({
             lastSeen: isChannel ? "Channel" : "Group",
           }}
           messages={messages}
-          onSendMessage={() => {}}
+          onSendMessage={handleSend}
           onBack={onClose}
           isLoading={loading}
           onLoadOlder={loadOlder}
           hasMoreOlder={hasMoreOlder}
           loadingOlder={loadingOlder}
           sessionString={sessionString}
-          readOnly
+          readOnly={!member}
           isGroup
           banner={member ? undefined : joinBanner}
         />

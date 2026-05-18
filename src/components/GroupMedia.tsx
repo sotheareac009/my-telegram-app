@@ -82,6 +82,8 @@ interface GroupMediaProps {
   session: string;
   groupId: string;
   groupTitle: string;
+  /** Opens this group/channel as a full message-stream chat view. */
+  onViewChat?: () => void;
   /**
    * Full media cache map keyed by `${groupId}::${cacheTab}` where cacheTab is
    * one of "all" | "photo" | "video" | "file". GroupMedia composes the key
@@ -533,6 +535,7 @@ export default function GroupMedia({
   session,
   groupId,
   groupTitle,
+  onViewChat,
   mediaCache,
   onCacheUpdate,
   destinationChats = [],
@@ -1480,6 +1483,19 @@ export default function GroupMedia({
           </button>
         ))}
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          {/* View chat button — opens the message stream for this chat */}
+          {!selectionMode && onViewChat && (
+            <button
+              type="button"
+              onClick={onViewChat}
+              title="View chat"
+              className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+            </button>
+          )}
           {/* Search button */}
           <button
             type="button"

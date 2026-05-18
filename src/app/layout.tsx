@@ -2,15 +2,19 @@ import type { Metadata } from "next";
 import { Geist_Mono, Play, Siemreap } from "next/font/google";
 import "./globals.css";
 
+// next/font CSS variables — referenced by the `--font-*` theme keys in
+// globals.css, which is what generates the `font-play` / `font-siemreap`
+// Tailwind utilities. Names kept distinct from the theme keys to avoid a
+// CSS-variable collision (same pattern as `--font-geist-mono` → `font-mono`).
 const play = Play({
-  variable: "--font-play",
+  variable: "--next-play",
   weight: ["400", "700"],
   subsets: ["latin"],
   display: "swap",
 });
 
 const siemreap = Siemreap({
-  variable: "--font-siemreap",
+  variable: "--next-siemreap",
   subsets: ["khmer"],
   weight: "400",
   display: "swap",

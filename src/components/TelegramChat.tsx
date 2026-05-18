@@ -1056,7 +1056,6 @@ export default function TelegramChat({
             className="flex flex-col h-full w-full"
             style={{
                 background: "#f0f2f5",
-                fontFamily: "'Roboto', sans-serif",
             }}
         >
             {/* ── Header ── */}

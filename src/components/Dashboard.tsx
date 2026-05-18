@@ -427,6 +427,19 @@ export default function Dashboard({
     setSelectedGroup(group);
   }
 
+  // Open the selected group/channel as a chat stream. Routed through the same
+  // `linkChat` layer as t.me-link chats so there is only ever ONE chat view —
+  // opening another (e.g. a link inside this chat) just replaces it.
+  function handleViewChat() {
+    if (!selectedGroup) return;
+    setLinkChat({
+      kind: activeMenu === "channels" ? "channel" : "group",
+      id: selectedGroup.id,
+      title: selectedGroup.title,
+      isMember: true,
+    });
+  }
+
   function handleBackToList() {
     setSelectedGroup(null);
   }
@@ -615,6 +628,92 @@ export default function Dashboard({
                         </div>
                       </button>
                     </div>
+
+                    {/* More destinations */}
+                    <div className="w-full">
+                      <p className="mb-2 px-1 text-left text-xs font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                        More
+                      </p>
+                      <div className="grid w-full grid-cols-3 gap-3">
+                        <button
+                          onClick={() => handleMenuChange("queue")}
+                          className="group flex flex-col items-center gap-2 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-amber-200 hover:shadow-lg hover:shadow-amber-500/10 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-amber-800"
+                        >
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 transition-colors group-hover:bg-amber-100 dark:bg-amber-950/40">
+                            <svg
+                              width="20"
+                              height="20"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className="text-amber-600 dark:text-amber-400"
+                            >
+                              <line x1="8" y1="6" x2="21" y2="6" />
+                              <line x1="8" y1="12" x2="21" y2="12" />
+                              <line x1="8" y1="18" x2="21" y2="18" />
+                              <line x1="3" y1="6" x2="3.01" y2="6" />
+                              <line x1="3" y1="12" x2="3.01" y2="12" />
+                              <line x1="3" y1="18" x2="3.01" y2="18" />
+                            </svg>
+                          </div>
+                          <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                            Queue
+                          </p>
+                        </button>
+
+                        <button
+                          onClick={() => handleMenuChange("my-contacts")}
+                          className="group flex flex-col items-center gap-2 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-200 hover:shadow-lg hover:shadow-emerald-500/10 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-emerald-800"
+                        >
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 transition-colors group-hover:bg-emerald-100 dark:bg-emerald-950/40">
+                            <svg
+                              width="20"
+                              height="20"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className="text-emerald-600 dark:text-emerald-400"
+                            >
+                              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                              <circle cx="9" cy="7" r="4" />
+                            </svg>
+                          </div>
+                          <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                            My Contacts
+                          </p>
+                        </button>
+
+                        <button
+                          onClick={() => handleMenuChange("recent-chats")}
+                          className="group flex flex-col items-center gap-2 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-sky-200 hover:shadow-lg hover:shadow-sky-500/10 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-sky-800"
+                        >
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 transition-colors group-hover:bg-sky-100 dark:bg-sky-950/40">
+                            <svg
+                              width="20"
+                              height="20"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className="text-sky-600 dark:text-sky-400"
+                            >
+                              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                            </svg>
+                          </div>
+                          <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                            Recent Chats
+                          </p>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
@@ -654,6 +753,7 @@ export default function Dashboard({
                     session={session}
                     groupId={selectedGroup.id}
                     groupTitle={selectedGroup.title}
+                    onViewChat={handleViewChat}
                     mediaCache={mediaCache}
                     onCacheUpdate={handleMediaCacheUpdate}
                     destinationChats={groupsCache ?? []}
@@ -679,6 +779,7 @@ export default function Dashboard({
             {linkChat && (
               <div className="absolute inset-0 z-30 bg-white dark:bg-zinc-950">
                 <GroupChatView
+                  key={linkChat.id ?? linkChat.inviteHash ?? linkChat.title}
                   sessionString={session}
                   target={linkChat}
                   onClose={() => setLinkChat(null)}

@@ -7,12 +7,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  const { sessionString, userId, accessHash, text } = await request.json();
+  const { sessionString, userId, accessHash, chatId, text } =
+    await request.json();
   if (typeof sessionString !== "string" || !sessionString) {
     return Response.json({ error: "Missing sessionString" }, { status: 400 });
   }
-  if (!userId) {
-    return Response.json({ error: "Missing userId" }, { status: 400 });
+  if (!userId && !chatId) {
+    return Response.json({ error: "Missing chat target" }, { status: 400 });
   }
   const body = typeof text === "string" ? text.trim() : "";
   if (!body) {
@@ -22,7 +23,11 @@ export async function POST(request: Request) {
   const client = createClient(sessionString);
   try {
     await client.connect();
-    const peer = await resolveUserPeer(client, userId, accessHash);
+    // A group/channel addresses by its marked id directly; a user needs an
+    // explicit InputPeerUser so it resolves on a cold client.
+    const peer = chatId
+      ? String(chatId)
+      : await resolveUserPeer(client, userId, accessHash);
     const sent = await client.sendMessage(peer, {
       message: body,
     });

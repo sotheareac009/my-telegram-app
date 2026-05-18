@@ -86,7 +86,7 @@ export default function LandingPage() {
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
             <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
           </span>
-          New · Multi-account workspaces
+          New · Send messages in groups & channels
         </div>
 
         <h1 className="mt-7 max-w-4xl text-4xl font-bold leading-[1.05] tracking-tight text-zinc-900 sm:text-6xl md:text-7xl">
@@ -260,6 +260,17 @@ export default function LandingPage() {
 
         <div className="mt-16 grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
           {[
+            {
+              title: "Send messages in groups",
+              desc: "Jump into any group or channel you've joined and send replies right from the dashboard — no app switching, no losing your place.",
+              comingSoon: false,
+              icon: (
+                <>
+                  <line x1="22" y1="2" x2="11" y2="13" />
+                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                </>
+              ),
+            },
             {
               title: "Auto-archive new media",
               desc: "Pick a chat, set it and forget it. New photos and videos save to your private archive the moment they arrive.",

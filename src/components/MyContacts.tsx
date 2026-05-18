@@ -351,7 +351,7 @@ export default function MyContacts({
 
                 {/* Chat */}
                 <div className="h-screen flex justify-center">
-                    <div className="w-full max-w-[700px] h-full flex flex-col">
+                    <div className="w-full h-full flex flex-col">
                         <div className="flex-1 overflow-hidden">
                             <TelegramChat
                                 //@ts-ignore

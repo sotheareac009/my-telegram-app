@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { useChatNav, telegramLinkTarget } from "./ChatNavContext";
+import { useForwardJobs } from "./ForwardJobsContext";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface ChatMedia {
@@ -41,6 +42,15 @@ interface Message {
     /** Sender id / name — shown above incoming bubbles in a group chat. */
     senderId?: string;
     senderName?: string;
+}
+
+/** A chat the user can forward messages to (from /api/telegram/dialogs). */
+interface ForwardDest {
+    id: string;
+    title: string;
+    isChannel?: boolean;
+    isGroup?: boolean;
+    isUser?: boolean;
 }
 
 /** A single openable item inside the full-screen media viewer. */
@@ -431,11 +441,11 @@ function MediaContent({
         );
     }
 
-    if (media.kind === "voice" || media.kind === "audio") {
+    if (media?.kind === "voice" || media?.kind === "audio") {
         return (
             <div className="flex flex-col gap-1 py-1">
                 <audio src={url} controls className="h-9 max-w-[240px]" />
-                {media.kind === "audio" && media.fileName && (
+                {media?.kind === "audio" && media?.fileName && (
                     <span className="max-w-[240px] truncate text-[11px] text-[#8a9aaa]">
                         {media.fileName}
                     </span>
@@ -444,7 +454,7 @@ function MediaContent({
         );
     }
 
-    if (media.kind === "contact") {
+    if (media?.kind === "contact") {
         return <ContactCard media={media} />;
     }
 
@@ -565,6 +575,7 @@ function MessageText({ text }: { text: string }) {
 
 // ── Sender label (group chat) ──────────────────────────────────────────────────
 function SenderLabel({ msg }: { msg: Message }) {
+    console.log("Rendering sender label for", msg);
     if (!msg.senderName) return null;
     return (
         <span
@@ -604,6 +615,7 @@ function AlbumBubble({
 
     const n = cells.length;
     const cols = n === 1 ? 1 : n === 2 || n === 4 ? 2 : 3;
+    console.log("Rendering album bubble for messages", messages);
 
     return (
         <div className={`flex ${fromMe ? "justify-end" : "justify-start"} mb-1`}>
@@ -687,41 +699,42 @@ function Bubble({
     isGroup?: boolean;
     onContextMenu?: (e: React.MouseEvent) => void;
 }) {
-    const media = msg.media;
-    const showSender = isGroup && !msg.fromMe && !!msg.senderName;
+    console.log("Rendering message", msg?.id,msg?.media,mediaUrl(msg?.id));
+    const media = msg?.media;
+    const showSender = isGroup && !msg?.fromMe && !!msg?.senderName;
     const metaRow = (
         <span className="ml-2 whitespace-nowrap text-[10px] leading-none text-[#aab8c2] select-none">
             {media?.kind === "video" || media?.kind === "voice" || media?.kind === "audio"
-                ? formatDuration(media.duration) + " · "
+                ? formatDuration(media?.duration) + " · "
                 : ""}
-            {formatTime(msg.timestamp)}
-            {msg.fromMe && <Ticks status={msg.status} />}
+            {formatTime(msg?.timestamp)}
+            {msg?.fromMe && <Ticks status={msg?.status} />}
         </span>
     );
 
     const openSelf = () => {
-        if (media && isViewable(media.kind)) {
+        if (media && isViewable(media?.kind)) {
             onOpenViewer(
-                [{ messageId: msg.id, kind: media.kind, thumb: media.thumb }],
+                [{ messageId: msg?.id, kind: media?.kind, thumb: media?.thumb }],
                 0,
             );
         }
     };
 
-    // Stickers render bare — no chat bubble — the Telegram-native way.
+    // Stickers render bare — no chat bubble — the Telegram-native way?.
     if (media?.kind === "sticker") {
         return (
             <div className={`flex ${msg.fromMe ? "justify-end" : "justify-start"} mb-1`}>
                 <div className="relative" onContextMenu={onContextMenu}>
                     <MediaContent
                         media={media}
-                        url={mediaUrl(msg.id)}
-                        downloadUrl={mediaUrl(msg.id, { download: true })}
-                        thumbUrl={mediaUrl(msg.id, { thumb: true })}
+                        url={mediaUrl(msg?.id)}
+                        downloadUrl={mediaUrl(msg?.id, { download: true })}
+                        thumbUrl={mediaUrl(msg?.id, { thumb: true })}
                     />
                     <span className="absolute bottom-0 right-0 rounded-full bg-black/35 px-1.5 py-0.5 text-[10px] leading-none text-white select-none">
-                        {formatTime(msg.timestamp)}
-                        {msg.fromMe && <Ticks status={msg.status} />}
+                        {formatTime(msg?.timestamp)}
+                        {msg?.fromMe && <Ticks status={msg?.status} />}
                     </span>
                 </div>
             </div>
@@ -732,13 +745,13 @@ function Bubble({
         media?.kind === "photo" || media?.kind === "video" || media?.kind === "gif";
 
     return (
-        <div className={`flex ${msg.fromMe ? "justify-end" : "justify-start"} mb-1`}>
+        <div className={`flex ${msg?.fromMe ? "justify-end" : "justify-start"} mb-1`}>
             <div
                 onContextMenu={onContextMenu}
                 className={`
                     relative max-w-[75%] rounded-2xl text-sm leading-relaxed
                     ${isVisualMedia ? "overflow-hidden p-1" : "px-3 py-2"}
-                    ${msg.fromMe
+                    ${msg?.fromMe
                         ? "bg-[#effdde] text-[#111] rounded-br-sm shadow-sm"
                         : "bg-white text-[#111] rounded-bl-sm shadow-sm"
                     }
@@ -746,7 +759,7 @@ function Bubble({
                 style={{ wordBreak: "break-word" }}
             >
                 {showSender && (
-                    <span className={isVisualMedia ? "block px-1 pt-0.5" : ""}>
+                    <span className={isVisualMedia ? "block p-1" : ""}>
                         <SenderLabel msg={msg} />
                     </span>
                 )}
@@ -754,26 +767,26 @@ function Bubble({
                     <div className={isVisualMedia ? "relative" : ""}>
                         <MediaContent
                             media={media}
-                            url={mediaUrl(msg.id)}
-                            downloadUrl={mediaUrl(msg.id, { download: true })}
-                            thumbUrl={mediaUrl(msg.id, { thumb: true })}
+                            url={mediaUrl(msg?.id)}
+                            downloadUrl={mediaUrl(msg?.id, { download: true })}
+                            thumbUrl={mediaUrl(msg?.id, { thumb: true })}
                             onOpen={openSelf}
                         />
-                        {/* For caption-less visual media, overlay the time. */}
-                        {isVisualMedia && !msg.text && (
+                        {/* For caption-less visual media, overlay the time?. */}
+                        {isVisualMedia && !msg?.text && (
                             <span className="absolute bottom-1.5 right-1.5 rounded-full bg-black/40 px-1.5 py-0.5 text-[10px] leading-none text-white select-none">
-                                {formatTime(msg.timestamp)}
-                                {msg.fromMe && <Ticks status={msg.status} />}
+                                {formatTime(msg?.timestamp)}
+                                {msg?.fromMe && <Ticks status={msg?.status} />}
                             </span>
                         )}
                     </div>
                 )}
-                {msg.text && (
+                {msg?.text && (
                     <span className={isVisualMedia ? "mt-1 block px-2 pb-1" : ""}>
-                        <MessageText text={msg.text} />
+                        <MessageText text={msg?.text} />
                     </span>
                 )}
-                {(!isVisualMedia || msg.text) && (
+                {(!isVisualMedia || msg?.text) && (
                     <span className={isVisualMedia ? "block px-2 pb-1 text-right" : "float-right mt-1 -mb-0.5"}>
                         {metaRow}
                     </span>
@@ -947,6 +960,7 @@ export default function TelegramChat({
 }: TelegramChatProps) {
     const mediaUrl: MediaUrlFn = (messageId, opts) =>
         buildMediaUrl(sessionString, contact, messageId, isGroup, opts);
+    const { startForward } = useForwardJobs();
     const [input, setInput] = useState("");
     const [isTyping, setIsTyping] = useState(false);
     // Full-screen media viewer state — null when closed.
@@ -956,16 +970,16 @@ export default function TelegramChat({
     } | null>(null);
     const openViewer = (items: ViewerItem[], index: number) =>
         setViewer({ items, index });
-    // Right-click context menu for message actions. Only armed when the parent
-    // passes onDeleteMessage; otherwise right-click falls through to the
-    // browser's native menu.
+    // Right-click context menu for message actions (forward / delete). Armed
+    // when forwarding is possible (a session is present) or the parent passes
+    // onDeleteMessage; otherwise right-click falls through to the native menu.
     const [menu, setMenu] = useState<{
         x: number;
         y: number;
         ids: string[];
     } | null>(null);
     function handleContextMenu(e: React.MouseEvent, ids: string[]) {
-        if (!onDeleteMessage) return;
+        if (!onDeleteMessage && !sessionString) return;
         e.preventDefault();
         setMenu({ x: e.clientX, y: e.clientY, ids });
     }
@@ -977,10 +991,75 @@ export default function TelegramChat({
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
     }, [menu]);
+
+    // ── Forward: pick a destination chat and forward the chosen messages ──
+    const [forwardIds, setForwardIds] = useState<string[] | null>(null);
+    const [destinations, setDestinations] = useState<ForwardDest[] | null>(null);
+    const [destLoading, setDestLoading] = useState(false);
+    const [destSearch, setDestSearch] = useState("");
+    const [forwardingTo, setForwardingTo] = useState<string | null>(null);
+
+    // Fetch the destination chat list — lazily, once, when the picker opens.
+    async function loadDestinations() {
+        if (destinations || destLoading || !sessionString) return;
+        setDestLoading(true);
+        try {
+            const res = await fetch("/api/telegram/dialogs", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sessionString }),
+            });
+            const data = await res.json();
+            setDestinations(Array.isArray(data.groups) ? data.groups : []);
+        } catch {
+            setDestinations([]);
+        } finally {
+            setDestLoading(false);
+        }
+    }
+
+    async function doForward(dest: ForwardDest) {
+        if (!forwardIds || forwardingTo) return;
+        const messageIds = forwardIds
+            .map(Number)
+            .filter((n) => Number.isInteger(n) && n > 0);
+        if (messageIds.length === 0) return;
+        setForwardingTo(dest.id);
+        // Routed through the shared forward pipeline: it tries a native forward
+        // first and falls back to download→re-send for restricted chats. The
+        // global floating card shows progress and the result toast.
+        const jobId = await startForward({
+            session: sessionString,
+            fromGroupId: contact.id,
+            fromGroupTitle:
+                `${contact.firstName} ${contact.lastName ?? ""}`.trim() ||
+                "Chat",
+            toGroupId: dest.id,
+            destinationTitle: dest.title,
+            destinationIsChannel: dest.isChannel,
+            messageIds,
+            contentSummary: `${messageIds.length} message${
+                messageIds.length === 1 ? "" : "s"
+            }`,
+        });
+        setForwardingTo(null);
+        if (jobId) {
+            setForwardIds(null);
+            setDestSearch("");
+        }
+    }
+
+    const filteredDestinations = (destinations ?? [])
+        .filter((d) => d.id !== contact.id)
+        .filter((d) => {
+            const q = destSearch.trim().toLowerCase();
+            return !q || d.title.toLowerCase().includes(q);
+        });
     const bottomRef = useRef<HTMLDivElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const grouped = groupMessagesByDate(messages);
+    console.log("Grouped messages:", grouped,messages);
 
     // Scroll behaviour:
     //  - atBottomRef: is the user parked near the bottom of the history?
@@ -1088,7 +1167,7 @@ export default function TelegramChat({
         <div
             className="flex flex-col h-full w-full"
             style={{
-                background: "#f0f2f5",
+                // background: "#f0f2f5",
             }}
         >
             {/* ── Header ── */}
@@ -1139,9 +1218,9 @@ export default function TelegramChat({
             <div
                 ref={scrollRef}
                 onScroll={handleScroll}
-                className="flex-1 overflow-y-auto px-4 py-2"
+                className="flex-1 overflow-y-auto px-4 py-2 w-[550px] mx-auto border-r border-l border-gray-200"
                 style={{
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%234a90d9' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%234a90d9' fill-opacity='0.06'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
                 }}
             >
                 {isLoading ? (
@@ -1183,9 +1262,10 @@ export default function TelegramChat({
                                             }
                                         />
                                     ) : (
+                                        <>
                                         <Bubble
                                             key={unit.id}
-                                            msg={unit}
+                                            msg={ unit}
                                             mediaUrl={mediaUrl}
                                             onOpenViewer={openViewer}
                                             isGroup={isGroup}
@@ -1193,6 +1273,7 @@ export default function TelegramChat({
                                                 handleContextMenu(e, [unit.id])
                                             }
                                         />
+                                        </>
                                     ),
                                 )}
                             </div>
@@ -1234,27 +1315,133 @@ export default function TelegramChat({
                             top: Math.min(menu.y, window.innerHeight - 60),
                         }}
                     >
-                        <button
-                            type="button"
-                            onClick={() => {
-                                onDeleteMessage?.(menu.ids);
-                                setMenu(null);
-                            }}
-                            className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
-                        >
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M3 6h18" />
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-                                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                <line x1="10" y1="11" x2="10" y2="17" />
-                                <line x1="14" y1="11" x2="14" y2="17" />
-                            </svg>
-                            {menu.ids.length > 1
-                                ? `Delete ${menu.ids.length} messages`
-                                : "Delete message"}
-                        </button>
+                        {sessionString && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setForwardIds(menu.ids);
+                                    setMenu(null);
+                                    void loadDestinations();
+                                }}
+                                className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100"
+                            >
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="15 17 20 12 15 7" />
+                                    <path d="M4 18v-2a4 4 0 0 1 4-4h12" />
+                                </svg>
+                                {menu.ids.length > 1
+                                    ? `Forward ${menu.ids.length} messages`
+                                    : "Forward message"}
+                            </button>
+                        )}
+                        {onDeleteMessage && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    onDeleteMessage?.(menu.ids);
+                                    setMenu(null);
+                                }}
+                                className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
+                            >
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M3 6h18" />
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                    <line x1="10" y1="11" x2="10" y2="17" />
+                                    <line x1="14" y1="11" x2="14" y2="17" />
+                                </svg>
+                                {menu.ids.length > 1
+                                    ? `Delete ${menu.ids.length} messages`
+                                    : "Delete message"}
+                            </button>
+                        )}
                     </div>
                 </>
+            )}
+
+            {/* ── Forward destination picker ── */}
+            {forwardIds && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+                    onClick={() => setForwardIds(null)}
+                >
+                    <div
+                        className="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
+                            <h3 className="text-sm font-semibold text-zinc-900">
+                                Forward{" "}
+                                {forwardIds.length > 1
+                                    ? `${forwardIds.length} messages`
+                                    : "message"}{" "}
+                                to…
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={() => setForwardIds(null)}
+                                className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-100"
+                                aria-label="Close"
+                            >
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M18 6 6 18M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div className="border-b border-zinc-100 p-3">
+                            <input
+                                type="search"
+                                value={destSearch}
+                                onChange={(e) => setDestSearch(e.target.value)}
+                                placeholder="Search chats…"
+                                className="h-9 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 outline-none transition-colors focus:border-blue-400 focus:bg-white"
+                            />
+                        </div>
+                        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                            {destLoading ? (
+                                <div className="flex h-32 items-center justify-center">
+                                    <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-200 border-t-blue-500" />
+                                </div>
+                            ) : filteredDestinations.length === 0 ? (
+                                <p className="py-12 text-center text-sm text-zinc-400">
+                                    No chats found.
+                                </p>
+                            ) : (
+                                <ul className="space-y-0.5">
+                                    {filteredDestinations.map((dest) => (
+                                        <li key={dest.id}>
+                                            <button
+                                                type="button"
+                                                disabled={!!forwardingTo}
+                                                onClick={() => doForward(dest)}
+                                                className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-zinc-100 disabled:opacity-60"
+                                            >
+                                                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-cyan-400 text-sm font-semibold text-white">
+                                                    {dest.title.charAt(0).toUpperCase()}
+                                                </span>
+                                                <span className="min-w-0 flex-1">
+                                                    <span className="block truncate text-sm font-medium text-zinc-900">
+                                                        {dest.title}
+                                                    </span>
+                                                    <span className="block text-xs text-zinc-400">
+                                                        {dest.isChannel
+                                                            ? "Channel"
+                                                            : dest.isGroup
+                                                              ? "Group"
+                                                              : "Private chat"}
+                                                    </span>
+                                                </span>
+                                                {forwardingTo === dest.id && (
+                                                    <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-zinc-300 border-t-blue-500" />
+                                                )}
+                                            </button>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                    </div>
+                </div>
             )}
 
             {/* ── Banner (Join button etc.) — replaces the composer ── */}
@@ -1264,7 +1451,7 @@ export default function TelegramChat({
                 </div>
             ) : readOnly ? null : (
             /* ── Input Bar ── */
-            <div className="shrink-0 px-3 py-2 bg-white border-t border-gray-200 flex items-end gap-2">
+            <div className="shrink-0 px-3 py-2 bg-white border-t border-gray-200 flex items-end gap-2 w-[550px] mx-auto rounded-2xl">
                 {/* emoji button */}
                 <button className="text-[#8a9aaa] hover:text-[#3390ec] transition-colors p-2 rounded-full hover:bg-[#3390ec]/10 shrink-0 mb-0.5">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none">

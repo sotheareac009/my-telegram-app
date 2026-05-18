@@ -58,6 +58,8 @@ type Contact = {
     lastName: string;
     username: string;
     phone: string;
+    /** Unread (unseen) incoming message count for this chat. */
+    unreadCount?: number;
     photo?: string;
 };
 
@@ -302,6 +304,22 @@ export default function RecentChats({ sessionString }: { sessionString: string }
         setLoadingOlder(false);
         void loadConversation(contact.id, contact.accessHash, true);
 
+        // Mark the chat seen — clear its unread badge locally and server-side.
+        setContacts((prev) =>
+            prev.map((c) =>
+                c.id === contact.id ? { ...c, unreadCount: 0 } : c,
+            ),
+        );
+        void fetch("/api/telegram/mark-read", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                sessionString,
+                userId: contact.id,
+                accessHash: contact.accessHash,
+            }),
+        });
+
         // fetch full user details (online status, bio, etc.)
         try {
             const res = await fetch("/api/telegram/user", {
@@ -352,7 +370,7 @@ export default function RecentChats({ sessionString }: { sessionString: string }
 
                 {/* Chat */}
                 <div className="h-screen flex justify-center">
-                    <div className="w-full max-w-[700px] h-full flex flex-col">
+                    <div className="w-full h-full flex flex-col">
                         <div className="flex-1 overflow-hidden">
                             <TelegramChat
                                 //@ts-ignore
@@ -472,6 +490,11 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                             {contact.username ? `@${contact.username}` : contact.phone}
                                         </p>
                                     </div>
+                                    {!!contact.unreadCount && (
+                                        <span className="flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-indigo-500 px-1.5 text-[11px] font-semibold text-white">
+                                            {contact.unreadCount > 99 ? "99+" : contact.unreadCount}
+                                        </span>
+                                    )}
                                 </div>
                             );
                         })}
@@ -485,8 +508,13 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                 <div
                                     key={contact.id}
                                     onClick={() => openChat(contact)}
-                                    className="bg-white border border-stone-200 rounded-2xl p-4 text-center cursor-pointer hover:-translate-y-0.5 hover:shadow-md hover:shadow-stone-200/80 hover:border-stone-300 transition-all duration-150"
+                                    className="relative bg-white border border-stone-200 rounded-2xl p-4 text-center cursor-pointer hover:-translate-y-0.5 hover:shadow-md hover:shadow-stone-200/80 hover:border-stone-300 transition-all duration-150"
                                 >
+                                    {!!contact.unreadCount && (
+                                        <span className="absolute right-2 top-2 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-indigo-500 px-1.5 text-[11px] font-semibold text-white">
+                                            {contact.unreadCount > 99 ? "99+" : contact.unreadCount}
+                                        </span>
+                                    )}
                                     <div className={`w-14 h-14 rounded-full bg-gradient-to-br ${gradient} flex items-center justify-center text-white font-semibold text-xl mx-auto mb-3 shadow-sm`}>
                                         {name.charAt(0).toUpperCase()}
                                     </div>

@@ -20,6 +20,8 @@ type PrivateChat = {
   phone: string;
   lastMessage: string;
   date: number;
+  /** Number of unread (unseen) incoming messages in this chat. */
+  unreadCount: number;
   /** Profile photo as a base64 JPEG data URL, when the user has one. */
   photo?: string;
 };
@@ -64,6 +66,7 @@ export async function POST(request: Request) {
         lastMessage:
           typeof lastMsg === "string" ? lastMsg.slice(0, 80) : "",
         date: d.date ?? 0,
+        unreadCount: d.unreadCount ?? 0,
       });
     }
 
@@ -88,6 +91,7 @@ export async function POST(request: Request) {
           phone: "",
           lastMessage: typeof lastMsg === "string" ? lastMsg.slice(0, 80) : "",
           date: selfDialog?.date ?? 0,
+          unreadCount: selfDialog?.unreadCount ?? 0,
         });
       }
     } catch {

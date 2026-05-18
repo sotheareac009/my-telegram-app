@@ -391,7 +391,7 @@ export default function GroupChatView({
       <div className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute -top-24 left-1/2 h-72 w-[640px] -translate-x-1/2 rounded-full bg-blue-300/20 blur-[120px] dark:bg-blue-500/10" />
       </div>
-      <div className="flex h-full w-full max-w-[700px] flex-col overflow-hidden shadow-xl shadow-blue-500/5 ring-1 ring-black/5 dark:shadow-black/30 dark:ring-white/5">
+      <div className="flex h-full w-full flex-col overflow-hidden shadow-xl shadow-blue-500/5 ring-1 ring-black/5 dark:shadow-black/30 dark:ring-white/5">
         <TelegramChat
           contact={{
             id: chatId,

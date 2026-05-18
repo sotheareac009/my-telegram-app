@@ -205,10 +205,10 @@ export default function Header({
             View site
           </button>
         </div>
-        <div className="relative" ref={menuRef}>
+        <div className="relative cursor-pointer" ref={menuRef}>
           <button
             onClick={() => setOpen(!open)}
-            className="flex items-center gap-2 rounded-xl px-2 py-1.5 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800/80"
+            className="cursor-pointer flex items-center gap-2 rounded-xl px-2 py-1.5 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800/80"
           >
             {profileAvatar}
             <div className="hidden flex-col items-start sm:flex">
@@ -261,7 +261,7 @@ export default function Header({
               {/* Accounts */}
               {accounts.length > 0 && (
                 <div className="border-b border-zinc-100 p-1.5 dark:border-zinc-800">
-                  <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                  <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-zinc-400 cursor-pointer">
                     Switch Account
                   </p>
                   <div className="max-h-48 overflow-y-auto">
@@ -275,7 +275,7 @@ export default function Header({
                             setOpen(false);
                             onSwitchAccount(account.id);
                           }}
-                          className={`flex w-full min-w-0 items-center gap-2.5 rounded-xl px-3 py-2 text-left transition-colors ${isCurrent ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800/60"}`}
+                          className={`cursor-pointer flex w-full min-w-0 items-center gap-2.5 rounded-xl px-3 py-2 text-left transition-colors ${isCurrent ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800/60"}`}
                         >
                           <AccountAvatar account={account} />
                           <div className="min-w-0 flex-1">

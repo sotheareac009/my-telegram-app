@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 8050",
-    "build": "next build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public",
+    "build": "next build",
+    "postbuild": "cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public",
     "start": "PORT=8050 node .next/standalone/server.js",
     "lint": "eslint"
   },

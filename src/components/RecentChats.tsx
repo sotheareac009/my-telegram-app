@@ -210,6 +210,33 @@ export default function RecentChats({ sessionString }: { sessionString: string }
         }
     }
 
+    /** Delete messages from the open chat. Only drops them from the view once
+     * the API confirms — Telegram rejects deletes that aren't allowed. */
+    async function handleDeleteMessage(ids: string[]) {
+        const contact = selectedContact;
+        if (!contact || ids.length === 0) return;
+        const messageIds = ids.map(Number).filter((n) => Number.isFinite(n));
+        if (messageIds.length === 0) return;
+        try {
+            const res = await fetch("/api/telegram/delete-message", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    sessionString,
+                    userId: contact.id,
+                    accessHash: contact.accessHash,
+                    messageIds,
+                }),
+            });
+            const data = await res.json();
+            if (res.ok && !data.error) {
+                setMessages((prev) => prev.filter((m) => !ids.includes(m.id)));
+            }
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
     // Live updates: poll the open conversation every 3s. The ref keeps the
     // interval stable while always calling the latest closure.
     const pollRef = useRef<() => void>(() => {});
@@ -332,6 +359,7 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                 contact={selectedContact}
                                 messages={messages}
                                 onSendMessage={handleSendMessage}
+                                onDeleteMessage={handleDeleteMessage}
                                 isLoading={messagesLoading}
                                 onLoadOlder={loadOlder}
                                 hasMoreOlder={hasMoreOlder}

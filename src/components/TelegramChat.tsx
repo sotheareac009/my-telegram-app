@@ -82,6 +82,11 @@ interface TelegramChatProps {
     isGroup?: boolean;
     /** Rendered in place of the composer (e.g. a Join button). */
     banner?: React.ReactNode;
+    /**
+     * Delete the given message ids. When provided, right-clicking a message
+     * opens a Delete menu; when omitted, the native browser menu shows.
+     */
+    onDeleteMessage?: (messageIds: string[]) => void;
 }
 
 /** Per-sender label colour, deterministic from the sender id. */
@@ -577,11 +582,13 @@ function AlbumBubble({
     mediaUrl,
     onOpenViewer,
     isGroup = false,
+    onContextMenu,
 }: {
     messages: Message[];
     mediaUrl: MediaUrlFn;
     onOpenViewer: (items: ViewerItem[], index: number) => void;
     isGroup?: boolean;
+    onContextMenu?: (e: React.MouseEvent) => void;
 }) {
     const fromMe = messages[0].fromMe;
     const last = messages[messages.length - 1];
@@ -601,6 +608,7 @@ function AlbumBubble({
     return (
         <div className={`flex ${fromMe ? "justify-end" : "justify-start"} mb-1`}>
             <div
+                onContextMenu={onContextMenu}
                 className={`relative max-w-[280px] overflow-hidden rounded-2xl p-1 text-sm shadow-sm ${
                     fromMe
                         ? "bg-[#effdde] rounded-br-sm"
@@ -671,11 +679,13 @@ function Bubble({
     mediaUrl,
     onOpenViewer,
     isGroup = false,
+    onContextMenu,
 }: {
     msg: Message;
     mediaUrl: MediaUrlFn;
     onOpenViewer: (items: ViewerItem[], index: number) => void;
     isGroup?: boolean;
+    onContextMenu?: (e: React.MouseEvent) => void;
 }) {
     const media = msg.media;
     const showSender = isGroup && !msg.fromMe && !!msg.senderName;
@@ -702,7 +712,7 @@ function Bubble({
     if (media?.kind === "sticker") {
         return (
             <div className={`flex ${msg.fromMe ? "justify-end" : "justify-start"} mb-1`}>
-                <div className="relative">
+                <div className="relative" onContextMenu={onContextMenu}>
                     <MediaContent
                         media={media}
                         url={mediaUrl(msg.id)}
@@ -724,6 +734,7 @@ function Bubble({
     return (
         <div className={`flex ${msg.fromMe ? "justify-end" : "justify-start"} mb-1`}>
             <div
+                onContextMenu={onContextMenu}
                 className={`
                     relative max-w-[75%] rounded-2xl text-sm leading-relaxed
                     ${isVisualMedia ? "overflow-hidden p-1" : "px-3 py-2"}
@@ -932,6 +943,7 @@ export default function TelegramChat({
     readOnly = false,
     isGroup = false,
     banner,
+    onDeleteMessage,
 }: TelegramChatProps) {
     const mediaUrl: MediaUrlFn = (messageId, opts) =>
         buildMediaUrl(sessionString, contact, messageId, isGroup, opts);
@@ -944,6 +956,27 @@ export default function TelegramChat({
     } | null>(null);
     const openViewer = (items: ViewerItem[], index: number) =>
         setViewer({ items, index });
+    // Right-click context menu for message actions. Only armed when the parent
+    // passes onDeleteMessage; otherwise right-click falls through to the
+    // browser's native menu.
+    const [menu, setMenu] = useState<{
+        x: number;
+        y: number;
+        ids: string[];
+    } | null>(null);
+    function handleContextMenu(e: React.MouseEvent, ids: string[]) {
+        if (!onDeleteMessage) return;
+        e.preventDefault();
+        setMenu({ x: e.clientX, y: e.clientY, ids });
+    }
+    useEffect(() => {
+        if (!menu) return;
+        function onKey(e: KeyboardEvent) {
+            if (e.key === "Escape") setMenu(null);
+        }
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [menu]);
     const bottomRef = useRef<HTMLDivElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -1142,6 +1175,12 @@ export default function TelegramChat({
                                             mediaUrl={mediaUrl}
                                             onOpenViewer={openViewer}
                                             isGroup={isGroup}
+                                            onContextMenu={(e) =>
+                                                handleContextMenu(
+                                                    e,
+                                                    unit.map((m) => m.id),
+                                                )
+                                            }
                                         />
                                     ) : (
                                         <Bubble
@@ -1150,6 +1189,9 @@ export default function TelegramChat({
                                             mediaUrl={mediaUrl}
                                             onOpenViewer={openViewer}
                                             isGroup={isGroup}
+                                            onContextMenu={(e) =>
+                                                handleContextMenu(e, [unit.id])
+                                            }
                                         />
                                     ),
                                 )}
@@ -1172,6 +1214,47 @@ export default function TelegramChat({
                         setViewer((v) => (v ? { ...v, index: next } : v))
                     }
                 />
+            )}
+
+            {/* ── Right-click message menu ── */}
+            {menu && (
+                <>
+                    <div
+                        className="fixed inset-0 z-50"
+                        onClick={() => setMenu(null)}
+                        onContextMenu={(e) => {
+                            e.preventDefault();
+                            setMenu(null);
+                        }}
+                    />
+                    <div
+                        className="fixed z-50 min-w-[170px] overflow-hidden rounded-xl border border-zinc-200 bg-white py-1 shadow-xl"
+                        style={{
+                            left: Math.min(menu.x, window.innerWidth - 190),
+                            top: Math.min(menu.y, window.innerHeight - 60),
+                        }}
+                    >
+                        <button
+                            type="button"
+                            onClick={() => {
+                                onDeleteMessage?.(menu.ids);
+                                setMenu(null);
+                            }}
+                            className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
+                        >
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M3 6h18" />
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                <line x1="10" y1="11" x2="10" y2="17" />
+                                <line x1="14" y1="11" x2="14" y2="17" />
+                            </svg>
+                            {menu.ids.length > 1
+                                ? `Delete ${menu.ids.length} messages`
+                                : "Delete message"}
+                        </button>
+                    </div>
+                </>
             )}
 
             {/* ── Banner (Join button etc.) — replaces the composer ── */}

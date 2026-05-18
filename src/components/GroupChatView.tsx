@@ -217,6 +217,38 @@ export default function GroupChatView({
     }
   }
 
+  // Delete one or more messages. Telegram enforces permissions server-side, so
+  // the messages are only dropped from the view when the API confirms success;
+  // a disallowed delete leaves them in place.
+  async function handleDelete(ids: string[]) {
+    const id = chatId;
+    if (!id || ids.length === 0) return;
+    const messageIds = ids.map(Number).filter((n) => Number.isFinite(n));
+    if (messageIds.length === 0) return;
+    try {
+      const res = await fetch("/api/telegram/delete-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          isUser
+            ? {
+                sessionString,
+                userId: id,
+                accessHash: target.accessHash,
+                messageIds,
+              }
+            : { sessionString, chatId: id, messageIds },
+        ),
+      });
+      const data = await res.json();
+      if (res.ok && !data.error) {
+        setMessages((prev) => prev.filter((m) => !ids.includes(m.id)));
+      }
+    } catch {
+      // ignore — the message stays if the delete didn't go through
+    }
+  }
+
   async function handleJoin() {
     setJoining(true);
     setJoinError(null);
@@ -368,6 +400,7 @@ export default function GroupChatView({
           }}
           messages={messages}
           onSendMessage={handleSend}
+          onDeleteMessage={handleDelete}
           onBack={onClose}
           isLoading={loading}
           onLoadOlder={loadOlder}

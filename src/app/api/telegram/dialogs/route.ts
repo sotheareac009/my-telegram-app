@@ -150,7 +150,12 @@ export async function POST(request: Request) {
     // users never leak into the Groups/Channels lists; only the forward
     // picker (which lists every destination) surfaces them.
     const groups = dialogs
-      .filter((d) => d.isGroup || d.isChannel || d.isUser)
+      // Skip the self dialog — "Saved Messages" is added explicitly below so
+      // it's always present and consistently labelled.
+      .filter((d) => {
+        if (d.entity instanceof Api.User && d.entity.self) return false;
+        return d.isGroup || d.isChannel || d.isUser;
+      })
       .map((d) => {
         const id = d.id?.toString() ?? "";
         return {
@@ -167,6 +172,27 @@ export async function POST(request: Request) {
             .map(([folderId]) => folderId),
         };
       });
+
+    // "Saved Messages" (the chat with yourself) — always available as a forward
+    // destination, pinned to the front, even when there's no self dialog yet.
+    try {
+      const me = await client.getMe();
+      if (me instanceof Api.User) {
+        groups.unshift({
+          id: me.id.toString(),
+          title: "Saved Messages",
+          unreadCount: 0,
+          isChannel: false,
+          isGroup: false,
+          isUser: true,
+          lastMessage: "",
+          date: 0,
+          folderIds: [] as string[],
+        });
+      }
+    } catch {
+      // getMe() failed — continue without Saved Messages.
+    }
 
     const folders = [...folderById.values()].filter((folder) =>
       groups.some((group) => group.folderIds.includes(folder.id))

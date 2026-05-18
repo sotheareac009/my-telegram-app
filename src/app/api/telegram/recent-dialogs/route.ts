@@ -49,7 +49,7 @@ export async function POST(request: Request) {
       if (!d.isUser) continue;
       const entity = d.entity;
       if (!(entity instanceof Api.User)) continue;
-      if (entity.self) continue; // skip "Saved Messages"
+      if (entity.self) continue; // added separately below as "Saved Messages"
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const lastMsg = (d.message as any)?.message;
       const id = entity.id.toString();
@@ -65,6 +65,33 @@ export async function POST(request: Request) {
           typeof lastMsg === "string" ? lastMsg.slice(0, 80) : "",
         date: d.date ?? 0,
       });
+    }
+
+    // "Saved Messages" — the chat with yourself. Pinned to the top, and sourced
+    // from getMe() so it shows even on accounts with no self dialog yet.
+    try {
+      const me = await client.getMe();
+      if (me instanceof Api.User) {
+        const selfId = me.id.toString();
+        entityById.set(selfId, me);
+        const selfDialog = dialogs.find(
+          (d) => d.entity instanceof Api.User && (d.entity as Api.User).self,
+        );
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const lastMsg = (selfDialog?.message as any)?.message;
+        chats.unshift({
+          id: selfId,
+          accessHash: me.accessHash ? me.accessHash.toString() : "0",
+          firstName: "Saved Messages",
+          lastName: "",
+          username: "",
+          phone: "",
+          lastMessage: typeof lastMsg === "string" ? lastMsg.slice(0, 80) : "",
+          date: selfDialog?.date ?? 0,
+        });
+      }
+    } catch {
+      // getMe() failed — omit Saved Messages rather than failing the list.
     }
 
     const q = String(search).trim().toLowerCase();

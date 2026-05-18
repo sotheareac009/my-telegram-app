@@ -6,12 +6,17 @@ import type { ChatMedia } from "@/app/api/telegram/conversation/route";
 
 /** A resolved Telegram link the viewer should open. */
 export interface GroupChatTarget {
-  kind: "channel" | "group" | "invite-preview";
-  /** Marked chat id — present for channel/group; absent for invite-preview. */
+  kind: "channel" | "group" | "invite-preview" | "user";
+  /**
+   * Marked chat id for channel/group; the user id for a `user` DM; absent for
+   * invite-preview.
+   */
   id?: string;
   title: string;
   /** Whether the account is already a member (channel/group only). */
   isMember?: boolean;
+  /** `user` kind only — resolves the peer on a cold client. */
+  accessHash?: string;
   /** invite-preview only. */
   about?: string;
   participants?: number;
@@ -76,8 +81,13 @@ export default function GroupChatView({
   target: GroupChatTarget;
   onClose: () => void;
 }) {
+  // A `user` chat is a 1-to-1 DM — addressed by userId/accessHash and always
+  // sendable (no join step, no read-only state).
+  const isUser = target.kind === "user";
   const [chatId, setChatId] = useState<string | undefined>(target.id);
-  const [member, setMember] = useState<boolean>(target.isMember ?? false);
+  const [member, setMember] = useState<boolean>(
+    isUser || (target.isMember ?? false),
+  );
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -94,7 +104,16 @@ export default function GroupChatView({
         const res = await fetch("/api/telegram/conversation", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionString, chatId: id, limit: 60 }),
+          body: JSON.stringify(
+            isUser
+              ? {
+                  sessionString,
+                  userId: id,
+                  accessHash: target.accessHash,
+                  limit: 60,
+                }
+              : { sessionString, chatId: id, limit: 60 },
+          ),
         });
         const data = await res.json();
         if (activeRef.current !== id) return;
@@ -109,7 +128,7 @@ export default function GroupChatView({
         if (initial) setLoading(false);
       }
     },
-    [sessionString],
+    [sessionString, isUser, target.accessHash],
   );
 
   async function loadOlder() {
@@ -122,12 +141,22 @@ export default function GroupChatView({
       const res = await fetch("/api/telegram/conversation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sessionString,
-          chatId: id,
-          limit: 50,
-          offsetId: Number(oldest.id),
-        }),
+        body: JSON.stringify(
+          isUser
+            ? {
+                sessionString,
+                userId: id,
+                accessHash: target.accessHash,
+                limit: 50,
+                offsetId: Number(oldest.id),
+              }
+            : {
+                sessionString,
+                chatId: id,
+                limit: 50,
+                offsetId: Number(oldest.id),
+              },
+        ),
       });
       const data = await res.json();
       if (activeRef.current !== id) return;
@@ -173,7 +202,11 @@ export default function GroupChatView({
       const res = await fetch("/api/telegram/send-message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionString, chatId: id, text }),
+        body: JSON.stringify(
+          isUser
+            ? { sessionString, userId: id, accessHash: target.accessHash, text }
+            : { sessionString, chatId: id, text },
+        ),
       });
       const data = await res.json();
       if (data.message && activeRef.current === id) {
@@ -331,7 +364,7 @@ export default function GroupChatView({
           contact={{
             id: chatId,
             firstName: target.title,
-            lastSeen: isChannel ? "Channel" : "Group",
+            lastSeen: isUser ? undefined : isChannel ? "Channel" : "Group",
           }}
           messages={messages}
           onSendMessage={handleSend}
@@ -342,7 +375,7 @@ export default function GroupChatView({
           loadingOlder={loadingOlder}
           sessionString={sessionString}
           readOnly={!member}
-          isGroup
+          isGroup={!isUser}
           banner={member ? undefined : joinBanner}
         />
       </div>

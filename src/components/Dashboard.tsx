@@ -334,13 +334,43 @@ export default function Dashboard({
   const [pendingUserChat, setPendingUserChat] = useState<ChatNavUser | null>(
     null,
   );
-  // A group/channel opened from a link — shown as a full-screen chat overlay.
-  const [linkChat, setLinkChat] = useState<GroupChatTarget | null>(null);
+  // Group/channel chats shown as a full-screen overlay, kept as a stack: a
+  // chat opened from a link inside another chat pushes a new level, so pressing
+  // back pops one level (the parent chat) instead of closing the whole layer.
+  const [chatStack, setChatStack] = useState<GroupChatTarget[]>([]);
+  // Mirror of "is a chat overlay open" — lets stable callbacks below decide
+  // without depending on (and churning with) chatStack.
+  const chatOpenRef = useRef(false);
+  useEffect(() => {
+    chatOpenRef.current = chatStack.length > 0;
+  }, [chatStack]);
 
-  const openUserChat = useCallback((user: ChatNavUser) => {
-    setPendingUserChat(user);
-    setActiveMenu("my-contacts");
+  const openChat = useCallback((target: GroupChatTarget) => {
+    setChatStack((prev) => [...prev, target]);
   }, []);
+  const closeTopChat = useCallback(() => {
+    setChatStack((prev) => prev.slice(0, -1));
+  }, []);
+
+  const openUserChat = useCallback(
+    (user: ChatNavUser) => {
+      // If a chat overlay is already open, open this DM as a new level right
+      // there — don't navigate away to the My Contacts page.
+      if (chatOpenRef.current) {
+        openChat({
+          kind: "user",
+          id: user.id,
+          accessHash: user.accessHash,
+          title:
+            [user.firstName, user.lastName].filter(Boolean).join(" ") || "Chat",
+        });
+        return;
+      }
+      setPendingUserChat(user);
+      setActiveMenu("my-contacts");
+    },
+    [openChat],
+  );
 
   /** Resolve a t.me link and open the channel/group/chat inside the app. */
   const openTelegramLink = useCallback(
@@ -374,14 +404,14 @@ export default function Dashboard({
         }
         if (data.kind === "channel" || data.kind === "group") {
           // Open the group/channel as a chat stream (not the media grid).
-          setLinkChat({
+          openChat({
             kind: data.kind,
             id: data.id,
             title: data.title,
             isMember: data.isMember,
           });
         } else if (data.kind === "invite-preview") {
-          setLinkChat({
+          openChat({
             kind: "invite-preview",
             title: data.title,
             about: data.about,
@@ -403,7 +433,7 @@ export default function Dashboard({
         fallback();
       }
     },
-    [session, openUserChat],
+    [session, openUserChat, openChat],
   );
 
   const chatNav = useMemo(
@@ -427,12 +457,11 @@ export default function Dashboard({
     setSelectedGroup(group);
   }
 
-  // Open the selected group/channel as a chat stream. Routed through the same
-  // `linkChat` layer as t.me-link chats so there is only ever ONE chat view —
-  // opening another (e.g. a link inside this chat) just replaces it.
+  // Open the selected group/channel as a chat stream — pushes the first level
+  // of the chat stack. Links tapped inside it push further levels.
   function handleViewChat() {
     if (!selectedGroup) return;
-    setLinkChat({
+    openChat({
       kind: activeMenu === "channels" ? "channel" : "group",
       id: selectedGroup.id,
       title: selectedGroup.title,
@@ -774,16 +803,29 @@ export default function Dashboard({
               )}
             </div>
 
-            {/* Link-opened group/channel — chat layer over the main content
-                area (header + sidebar stay visible). */}
-            {linkChat && (
-              <div className="absolute inset-0 z-30 bg-white dark:bg-zinc-950">
-                <GroupChatView
-                  key={linkChat.id ?? linkChat.inviteHash ?? linkChat.title}
-                  sessionString={session}
-                  target={linkChat}
-                  onClose={() => setLinkChat(null)}
-                />
+            {/* Open group/channel chats — a stacked layer over the main
+                content area (header + sidebar stay visible). Every level stays
+                mounted so a parent chat keeps its scroll position while you're
+                deeper in; the top level renders opaque over the rest. Back
+                pops one level down to the parent chat. */}
+            {chatStack.length > 0 && (
+              <div className="absolute inset-0 z-30">
+                {chatStack.map((chat, i) => {
+                  const isTop = i === chatStack.length - 1;
+                  return (
+                    <div
+                      key={`${i}:${chat.id ?? chat.inviteHash ?? chat.title}`}
+                      inert={!isTop}
+                      className="absolute inset-0 bg-white dark:bg-zinc-950"
+                    >
+                      <GroupChatView
+                        sessionString={session}
+                        target={chat}
+                        onClose={closeTopChat}
+                      />
+                    </div>
+                  );
+                })}
               </div>
             )}
           </main>

@@ -593,7 +593,11 @@ function SenderLabel({ msg }: { msg: Message }) {
     );
 }
 
-/** "Forwarded from …" header shown above a forwarded message's content. */
+/**
+ * "Forwarded from …" header shown above a forwarded message. The origin's
+ * name + avatar are clickable when reachable — a channel/group resolves like a
+ * t.me link (opening a nested chat), a user opens directly.
+ */
 function ForwardLabel({
     info,
     session,
@@ -603,6 +607,50 @@ function ForwardLabel({
     session: string;
     padded?: boolean;
 }) {
+    const nav = useChatNav();
+    // The origin is reachable whenever it resolved to a peer id.
+    const canOpen = !!nav && !!info.id;
+
+    function open(e: React.MouseEvent) {
+        e.stopPropagation();
+        if (!nav || !info.id) return;
+        if (info.isUser) {
+            // A user — open the DM directly (always nests onto the chat stack).
+            nav.openChat({
+                kind: "user",
+                id: info.id,
+                accessHash: info.accessHash,
+                title: info.name,
+                isMember: true,
+            });
+        } else if (info.username) {
+            // Public channel/group — resolve like a t.me link, which also
+            // recovers correct membership.
+            nav.openTelegramLink(`https://t.me/${info.username}`);
+        } else {
+            // Private channel/group — open directly by marked id + access hash.
+            nav.openChat({
+                kind: info.isChannel ? "channel" : "group",
+                id: info.isChannel ? `-100${info.id}` : `-${info.id}`,
+                accessHash: info.accessHash,
+                title: info.name,
+            });
+        }
+    }
+
+    const avatar = info.id ? (
+        <DialogAvatar
+            session={session}
+            groupId={info.id}
+            title={info.name}
+            fallbackClassName="from-blue-500 to-cyan-400"
+            sizeClassName="h-4 w-4 shrink-0"
+            textClassName="text-[9px]"
+            accessHash={info.accessHash}
+            peerType={info.isChannel ? "channel" : "user"}
+        />
+    ) : null;
+
     return (
         <span
             className={`mb-[0.5rem] flex items-center gap-1 text-[12px] leading-snug ${
@@ -610,21 +658,26 @@ function ForwardLabel({
             }`}
         >
             <span className="shrink-0 text-[#8a9aaa]">Forwarded from</span>
-            {info.id && (
-                <DialogAvatar
-                    session={session}
-                    groupId={info.id}
-                    title={info.name}
-                    fallbackClassName="from-blue-500 to-cyan-400"
-                    sizeClassName="h-4 w-4 shrink-0"
-                    textClassName="text-[9px]"
-                    accessHash={info.accessHash}
-                    peerType={info.isChannel ? "channel" : "user"}
-                />
+            {canOpen ? (
+                <button
+                    type="button"
+                    onClick={open}
+                    title={`Open ${info.name}`}
+                    className="flex min-w-0 cursor-pointer items-center gap-1"
+                >
+                    {avatar}
+                    <span className="min-w-0 truncate font-semibold text-[#3390ec] hover:underline">
+                        {info.name}
+                    </span>
+                </button>
+            ) : (
+                <>
+                    {avatar}
+                    <span className="min-w-0 truncate font-semibold text-[#3390ec]">
+                        {info.name}
+                    </span>
+                </>
             )}
-            <span className="min-w-0 truncate font-semibold text-[#3390ec]">
-                {info.name}
-            </span>
         </span>
     );
 }

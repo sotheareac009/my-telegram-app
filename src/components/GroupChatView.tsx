@@ -121,7 +121,12 @@ export default function GroupChatView({
                   accessHash: target.accessHash,
                   limit: 60,
                 }
-              : { sessionString, chatId: id, limit: 60 },
+              : {
+                  sessionString,
+                  chatId: id,
+                  accessHash: target.accessHash,
+                  limit: 60,
+                },
           ),
         });
         const data = await res.json();
@@ -162,6 +167,7 @@ export default function GroupChatView({
             : {
                 sessionString,
                 chatId: id,
+                accessHash: target.accessHash,
                 limit: 50,
                 offsetId: Number(oldest.id),
               },

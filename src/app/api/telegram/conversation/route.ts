@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/telegram";
 import { Api, utils as telegramUtils } from "telegram";
+import bigInt from "big-integer";
 import { resolveUserPeer } from "@/lib/telegram-peer";
 
 export const runtime = "nodejs";
@@ -40,8 +41,12 @@ export type ForwardInfo = {
   id?: string;
   /** Origin peer access hash — lets the photo resolve on a cold client. */
   accessHash?: string;
-  /** True when the origin is a channel/supergroup (vs a user). */
+  /** True when the origin is a channel/supergroup. */
   isChannel?: boolean;
+  /** True when the origin is a user (vs a channel/group). */
+  isUser?: boolean;
+  /** Public @username of the origin, when it has one — enables click-to-open. */
+  username?: string;
 };
 
 export type ChatMessage = {
@@ -207,16 +212,22 @@ function extractForward(msg: any): ForwardInfo | undefined {
 
   let id: string | undefined;
   let accessHash: string | undefined;
+  let username: string | undefined;
   let isChannel = false;
+  let isUser = false;
   try {
     // GramJS' Forward helper carries the resolved origin entity.
     const origin = msg.forward?.chat ?? msg.forward?.sender;
     if (origin) {
       id = origin.id?.toString();
+      if (typeof origin.username === "string" && origin.username) {
+        username = origin.username;
+      }
       if (origin instanceof Api.Channel) {
         isChannel = true;
         accessHash = origin.accessHash?.toString();
       } else if (origin instanceof Api.User) {
+        isUser = true;
         accessHash = origin.accessHash?.toString();
       }
       if (!name) {
@@ -235,7 +246,7 @@ function extractForward(msg: any): ForwardInfo | undefined {
   }
 
   if (!name) return undefined;
-  return { name, id, accessHash, isChannel };
+  return { name, id, accessHash, isChannel, isUser, username };
 }
 
 /** Map a GramJS message to the client-facing shape. */
@@ -283,11 +294,23 @@ export async function POST(request: Request) {
   try {
     await client.connect();
 
-    // For a group/channel the marked id resolves directly; for a user we build
-    // an explicit InputPeerUser so it works on a cold client.
-    const peer = isGroup
-      ? String(chatId)
-      : await resolveUserPeer(client, userId, accessHash);
+    // Resolve the peer:
+    //  - user → an explicit InputPeerUser so it works on a cold client;
+    //  - channel with an access hash (e.g. a forward origin not in the
+    //    account's dialogs) → an explicit InputPeerChannel;
+    //  - any other group/channel → the marked id, which resolves directly.
+    let peer: string | Api.InputPeerUser | Api.InputPeerChannel;
+    if (!isGroup) {
+      peer = await resolveUserPeer(client, userId, accessHash);
+    } else if (accessHash) {
+      const [bareId] = telegramUtils.resolveId(bigInt(String(chatId)));
+      peer = new Api.InputPeerChannel({
+        channelId: bareId,
+        accessHash: bigInt(String(accessHash)),
+      });
+    } else {
+      peer = String(chatId);
+    }
 
     // Read state — the highest outgoing message id the peer has read. Used to
     // mark our own messages as "seen". Best-effort; user chats only.

@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
+import type { GroupChatTarget } from "./GroupChatView";
 
 /** A user to open a 1-to-1 chat with (from a contact share or a t.me/<user> link). */
 export interface ChatNavUser {
@@ -19,6 +20,8 @@ export interface ChatNavValue {
   openTelegramLink: (url: string) => void;
   /** Open a 1-to-1 chat with the given user in-app. */
   openUserChat: (user: ChatNavUser) => void;
+  /** Open an already-resolved chat target — pushes it onto the chat stack. */
+  openChat: (target: GroupChatTarget) => void;
 }
 
 const ChatNavContext = createContext<ChatNavValue | null>(null);

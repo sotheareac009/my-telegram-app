@@ -440,8 +440,8 @@ export default function Dashboard({
   );
 
   const chatNav = useMemo(
-    () => ({ openTelegramLink, openUserChat }),
-    [openTelegramLink, openUserChat],
+    () => ({ openTelegramLink, openUserChat, openChat }),
+    [openTelegramLink, openUserChat, openChat],
   );
 
   function handleMenuChange(menu: string) {

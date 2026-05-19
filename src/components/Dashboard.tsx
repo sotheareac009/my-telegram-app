@@ -173,6 +173,9 @@ export default function Dashboard({
       // ignore
     }
   }, [selectedGroup]);
+  // Which sub-view a selected group/channel opens in. Defaults to the chat —
+  // the media grid is reached via a header button, like the Telegram app.
+  const [groupView, setGroupView] = useState<"chat" | "media">("chat");
   console.log(
     "Rendering Dashboard with session:",
     session,
@@ -455,18 +458,30 @@ export default function Dashboard({
 
   function handleGroupSelect(group: GroupInfo) {
     setSelectedGroup(group);
+    // A group/channel opens in its chat by default.
+    setGroupView("chat");
+    // Viewing it counts as reading it — clear the unread badge in the list and
+    // mark the chat read on Telegram.
+    const cached = groupsCache?.find((g) => g.id === group.id);
+    if (cached && cached.unreadCount > 0) {
+      setGroupsCache((prev) =>
+        prev
+          ? prev.map((g) =>
+              g.id === group.id ? { ...g, unreadCount: 0 } : g,
+            )
+          : prev,
+      );
+      void fetch("/api/telegram/mark-read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionString: session, chatId: group.id }),
+      });
+    }
   }
 
-  // Open the selected group/channel as a chat stream — pushes the first level
-  // of the chat stack. Links tapped inside it push further levels.
+  // GroupMedia's "View chat" button — switch the open group back to its chat.
   function handleViewChat() {
-    if (!selectedGroup) return;
-    openChat({
-      kind: activeMenu === "channels" ? "channel" : "group",
-      id: selectedGroup.id,
-      title: selectedGroup.title,
-      isMember: true,
-    });
+    setGroupView("chat");
   }
 
   function handleBackToList() {
@@ -778,16 +793,46 @@ export default function Dashboard({
 
               {(activeMenu === "groups" || activeMenu === "channels") &&
                 selectedGroup && (
-                  <GroupMedia
-                    session={session}
-                    groupId={selectedGroup.id}
-                    groupTitle={selectedGroup.title}
-                    onViewChat={handleViewChat}
-                    mediaCache={mediaCache}
-                    onCacheUpdate={handleMediaCacheUpdate}
-                    destinationChats={groupsCache ?? []}
-                    onLeave={() => handleLeaveGroup(selectedGroup.id)}
-                  />
+                  // Both views stay mounted (the inactive one is hidden with
+                  // `visibility`, which keeps its layout) so switching between
+                  // the chat and the media grid preserves each one's scroll
+                  // position and loaded state.
+                  <div key={selectedGroup.id} className="relative h-full">
+                    <div
+                      className={`absolute inset-0 ${
+                        groupView === "media" ? "" : "invisible"
+                      }`}
+                    >
+                      <GroupMedia
+                        session={session}
+                        groupId={selectedGroup.id}
+                        groupTitle={selectedGroup.title}
+                        onViewChat={handleViewChat}
+                        mediaCache={mediaCache}
+                        onCacheUpdate={handleMediaCacheUpdate}
+                        destinationChats={groupsCache ?? []}
+                        onLeave={() => handleLeaveGroup(selectedGroup.id)}
+                      />
+                    </div>
+                    <div
+                      className={`absolute inset-0 ${
+                        groupView === "chat" ? "" : "invisible"
+                      }`}
+                    >
+                      <GroupChatView
+                        sessionString={session}
+                        target={{
+                          kind:
+                            activeMenu === "channels" ? "channel" : "group",
+                          id: selectedGroup.id,
+                          title: selectedGroup.title,
+                          isMember: true,
+                        }}
+                        onClose={handleBackToList}
+                        onViewMedia={() => setGroupView("media")}
+                      />
+                    </div>
+                  </div>
                 )}
 
               {activeMenu === "queue" && <ForwardQueueDashboard />}

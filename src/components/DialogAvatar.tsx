@@ -7,6 +7,14 @@ interface DialogAvatarProps {
   groupId: string;
   title: string;
   fallbackClassName: string;
+  /** Tailwind size (h/w) classes for the avatar. Defaults to a 56px circle. */
+  sizeClassName?: string;
+  /** Font-size class for the fallback initial. */
+  textClassName?: string;
+  /** Access hash — lets a non-dialog peer (e.g. a forward origin) resolve. */
+  accessHash?: string;
+  /** Peer kind, paired with accessHash, so the photo endpoint builds the peer. */
+  peerType?: "channel" | "user";
 }
 
 type AvatarCacheValue = string | "failed";
@@ -19,7 +27,9 @@ function avatarKey(session: string, groupId: string) {
 
 function loadAvatar(
   session: string,
-  groupId: string
+  groupId: string,
+  accessHash?: string,
+  peerType?: "channel" | "user"
 ): Promise<AvatarCacheValue> {
   const key = avatarKey(session, groupId);
   const cached = avatarCache.get(key);
@@ -33,7 +43,12 @@ function loadAvatar(
       const res = await fetch("/api/telegram/dialog-photo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionString: session, groupId }),
+        body: JSON.stringify({
+          sessionString: session,
+          groupId,
+          accessHash,
+          peerType,
+        }),
       });
       if (!res.ok) {
         avatarCache.set(key, "failed");
@@ -60,6 +75,10 @@ export default function DialogAvatar({
   groupId,
   title,
   fallbackClassName,
+  sizeClassName = "h-14 w-14",
+  textClassName = "text-lg",
+  accessHash,
+  peerType,
 }: DialogAvatarProps) {
   const initial = avatarCache.get(avatarKey(session, groupId));
   const [url, setUrl] = useState<string | null>(
@@ -84,7 +103,7 @@ export default function DialogAvatar({
       return;
     }
 
-    void loadAvatar(session, groupId).then((result) => {
+    void loadAvatar(session, groupId, accessHash, peerType).then((result) => {
       if (cancelled) return;
       if (result === "failed") setFailed(true);
       else setUrl(result);
@@ -93,13 +112,15 @@ export default function DialogAvatar({
     return () => {
       cancelled = true;
     };
-  }, [groupId, session]);
+  }, [groupId, session, accessHash, peerType]);
 
   if (url && !failed) {
     return (
       <>
         {!loaded && (
-          <div className="h-14 w-14 animate-pulse rounded-full bg-zinc-200 dark:bg-zinc-700" />
+          <div
+            className={`${sizeClassName} animate-pulse rounded-full bg-zinc-200 dark:bg-zinc-700`}
+          />
         )}
         <img
           src={url}
@@ -109,7 +130,7 @@ export default function DialogAvatar({
             setFailed(true);
             setLoaded(false);
           }}
-          className={`h-14 w-14 rounded-full object-cover shadow-md ${
+          className={`${sizeClassName} rounded-full object-cover shadow-md ${
             loaded ? "block" : "hidden"
           }`}
         />
@@ -119,7 +140,7 @@ export default function DialogAvatar({
 
   return (
     <div
-      className={`flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br ${fallbackClassName} text-lg font-bold text-white shadow-md`}
+      className={`flex ${sizeClassName} items-center justify-center rounded-full bg-gradient-to-br ${fallbackClassName} ${textClassName} font-bold text-white shadow-md`}
     >
       {title[0]?.toUpperCase()}
     </div>

@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { useChatNav, telegramLinkTarget } from "./ChatNavContext";
 import { useForwardJobs } from "./ForwardJobsContext";
+import DialogAvatar from "./DialogAvatar";
+import type { ForwardInfo } from "@/app/api/telegram/conversation/route";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface ChatMedia {
@@ -42,6 +44,8 @@ interface Message {
     /** Sender id / name — shown above incoming bubbles in a group chat. */
     senderId?: string;
     senderName?: string;
+    /** Origin info when this message is a forward. */
+    forwardedFrom?: ForwardInfo;
 }
 
 /** A chat the user can forward messages to (from /api/telegram/dialogs). */
@@ -97,6 +101,8 @@ interface TelegramChatProps {
      * opens a Delete menu; when omitted, the native browser menu shows.
      */
     onDeleteMessage?: (messageIds: string[]) => void;
+    /** When provided, a "shared media" button appears in the chat header. */
+    onViewMedia?: () => void;
 }
 
 /** Per-sender label colour, deterministic from the sender id. */
@@ -587,6 +593,42 @@ function SenderLabel({ msg }: { msg: Message }) {
     );
 }
 
+/** "Forwarded from …" header shown above a forwarded message's content. */
+function ForwardLabel({
+    info,
+    session,
+    padded,
+}: {
+    info: ForwardInfo;
+    session: string;
+    padded?: boolean;
+}) {
+    return (
+        <span
+            className={`mb-[0.5rem] flex items-center gap-1 text-[12px] leading-snug ${
+                padded ? "px-2 pt-1" : ""
+            }`}
+        >
+            <span className="shrink-0 text-[#8a9aaa]">Forwarded from</span>
+            {info.id && (
+                <DialogAvatar
+                    session={session}
+                    groupId={info.id}
+                    title={info.name}
+                    fallbackClassName="from-blue-500 to-cyan-400"
+                    sizeClassName="h-4 w-4 shrink-0"
+                    textClassName="text-[9px]"
+                    accessHash={info.accessHash}
+                    peerType={info.isChannel ? "channel" : "user"}
+                />
+            )}
+            <span className="min-w-0 truncate font-semibold text-[#3390ec]">
+                {info.name}
+            </span>
+        </span>
+    );
+}
+
 // ── Album bubble (grouped media → tiled grid) ──────────────────────────────────
 function AlbumBubble({
     messages,
@@ -594,12 +636,14 @@ function AlbumBubble({
     onOpenViewer,
     isGroup = false,
     onContextMenu,
+    sessionString = "",
 }: {
     messages: Message[];
     mediaUrl: MediaUrlFn;
     onOpenViewer: (items: ViewerItem[], index: number) => void;
     isGroup?: boolean;
     onContextMenu?: (e: React.MouseEvent) => void;
+    sessionString?: string;
 }) {
     const fromMe = messages[0].fromMe;
     const last = messages[messages.length - 1];
@@ -631,6 +675,13 @@ function AlbumBubble({
                     <span className="px-1 pt-0.5">
                         <SenderLabel msg={messages[0]} />
                     </span>
+                )}
+                {messages[0]?.forwardedFrom && (
+                    <ForwardLabel
+                        info={messages[0].forwardedFrom}
+                        session={sessionString}
+                        padded
+                    />
                 )}
                 <div
                     className="grid gap-0.5 overflow-hidden rounded-lg"
@@ -692,12 +743,14 @@ function Bubble({
     onOpenViewer,
     isGroup = false,
     onContextMenu,
+    sessionString = "",
 }: {
     msg: Message;
     mediaUrl: MediaUrlFn;
     onOpenViewer: (items: ViewerItem[], index: number) => void;
     isGroup?: boolean;
     onContextMenu?: (e: React.MouseEvent) => void;
+    sessionString?: string;
 }) {
     console.log("Rendering message", msg?.id,msg?.media,mediaUrl(msg?.id));
     const media = msg?.media;
@@ -758,6 +811,13 @@ function Bubble({
                 `}
                 style={{ wordBreak: "break-word" }}
             >
+                {msg?.forwardedFrom && (
+                    <ForwardLabel
+                        info={msg.forwardedFrom}
+                        session={sessionString}
+                        padded={isVisualMedia}
+                    />
+                )}
                 {showSender && (
                     <span className={isVisualMedia ? "block p-1" : ""}>
                         <SenderLabel msg={msg} />
@@ -957,6 +1017,7 @@ export default function TelegramChat({
     isGroup = false,
     banner,
     onDeleteMessage,
+    onViewMedia,
 }: TelegramChatProps) {
     const mediaUrl: MediaUrlFn = (messageId, opts) =>
         buildMediaUrl(sessionString, contact, messageId, isGroup, opts);
@@ -1199,6 +1260,21 @@ export default function TelegramChat({
 
                 {/* header actions */}
                 <div className="flex gap-1 text-[#8a9aaa]">
+                    {onViewMedia && (
+                        <button
+                            type="button"
+                            onClick={onViewMedia}
+                            title="Shared media"
+                            className="p-2 hover:text-[#3390ec] hover:bg-[#3390ec]/10 rounded-full transition-colors"
+                        >
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="3" y="3" width="7" height="7" rx="1.5" />
+                                <rect x="14" y="3" width="7" height="7" rx="1.5" />
+                                <rect x="3" y="14" width="7" height="7" rx="1.5" />
+                                <rect x="14" y="14" width="7" height="7" rx="1.5" />
+                            </svg>
+                        </button>
+                    )}
                     <button className="p-2 hover:text-[#3390ec] hover:bg-[#3390ec]/10 rounded-full transition-colors">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                             <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -1254,6 +1330,7 @@ export default function TelegramChat({
                                             mediaUrl={mediaUrl}
                                             onOpenViewer={openViewer}
                                             isGroup={isGroup}
+                                            sessionString={sessionString}
                                             onContextMenu={(e) =>
                                                 handleContextMenu(
                                                     e,
@@ -1262,18 +1339,17 @@ export default function TelegramChat({
                                             }
                                         />
                                     ) : (
-                                        <>
                                         <Bubble
                                             key={unit.id}
                                             msg={ unit}
                                             mediaUrl={mediaUrl}
                                             onOpenViewer={openViewer}
                                             isGroup={isGroup}
+                                            sessionString={sessionString}
                                             onContextMenu={(e) =>
                                                 handleContextMenu(e, [unit.id])
                                             }
                                         />
-                                        </>
                                     ),
                                 )}
                             </div>
@@ -1416,9 +1492,14 @@ export default function TelegramChat({
                                                 onClick={() => doForward(dest)}
                                                 className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-zinc-100 disabled:opacity-60"
                                             >
-                                                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-cyan-400 text-sm font-semibold text-white">
-                                                    {dest.title.charAt(0).toUpperCase()}
-                                                </span>
+                                                <DialogAvatar
+                                                    session={sessionString}
+                                                    groupId={dest.id}
+                                                    title={dest.title}
+                                                    fallbackClassName="from-blue-500 to-cyan-400"
+                                                    sizeClassName="h-9 w-9 shrink-0"
+                                                    textClassName="text-sm"
+                                                />
                                                 <span className="min-w-0 flex-1">
                                                     <span className="block truncate text-sm font-medium text-zinc-900">
                                                         {dest.title}

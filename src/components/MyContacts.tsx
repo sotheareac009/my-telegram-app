@@ -3,7 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { LayoutGrid, List, ChevronLeft, ChevronRight, Search, X, ArrowLeft } from "lucide-react";
 import TelegramChat from "./TelegramChat";
-import type { ChatMedia } from "@/app/api/telegram/conversation/route";
+import type {
+    ChatMedia,
+    ForwardInfo,
+} from "@/app/api/telegram/conversation/route";
 import type { ChatNavUser } from "./ChatNavContext";
 
 type Contact = {
@@ -38,6 +41,7 @@ type ChatUiMessage = {
     status?: "sent" | "delivered" | "read";
     media?: ChatMedia;
     groupedId?: string;
+    forwardedFrom?: ForwardInfo;
 };
 
 /** Raw message shape returned by /api/telegram/conversation. */
@@ -49,6 +53,7 @@ type ApiMessage = {
     status?: "sent" | "read";
     media?: ChatMedia;
     groupedId?: string;
+    forwardedFrom?: ForwardInfo;
 };
 
 function toUiMessage(m: ApiMessage): ChatUiMessage {
@@ -60,6 +65,7 @@ function toUiMessage(m: ApiMessage): ChatUiMessage {
         status: m.status,
         media: m.media,
         groupedId: m.groupedId,
+        forwardedFrom: m.forwardedFrom,
     };
 }
 

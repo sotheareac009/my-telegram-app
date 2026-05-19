@@ -32,6 +32,18 @@ export type ChatMedia = {
   contactPhone?: string;
 };
 
+/** Where a forwarded message originated — name plus the peer for its photo. */
+export type ForwardInfo = {
+  /** Display name of the origin chat or user. */
+  name: string;
+  /** Origin peer id — used to fetch its profile photo. */
+  id?: string;
+  /** Origin peer access hash — lets the photo resolve on a cold client. */
+  accessHash?: string;
+  /** True when the origin is a channel/supergroup (vs a user). */
+  isChannel?: boolean;
+};
+
 export type ChatMessage = {
   id: number;
   text: string;
@@ -45,6 +57,8 @@ export type ChatMessage = {
   senderId?: string;
   /** Sender display name — set for group/channel messages. */
   senderName?: string;
+  /** Origin info when this message is a forward. */
+  forwardedFrom?: ForwardInfo;
 };
 
 /** Decode a Telegram stripped thumbnail into an inline JPEG data URL. */
@@ -175,6 +189,55 @@ function extractSender(msg: any): { id?: string; name?: string } {
   return { id, name: name || undefined };
 }
 
+/**
+ * Where a forwarded message came from — name + origin peer — or undefined for
+ * normal messages (including content re-uploaded from a restricted chat,
+ * which carries no forward header).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractForward(msg: any): ForwardInfo | undefined {
+  const fwd = msg.fwdFrom;
+  if (!fwd) return undefined;
+
+  let name: string | undefined;
+  // Hidden original sender — Telegram sends a bare name string.
+  if (typeof fwd.fromName === "string" && fwd.fromName.trim()) {
+    name = fwd.fromName.trim();
+  }
+
+  let id: string | undefined;
+  let accessHash: string | undefined;
+  let isChannel = false;
+  try {
+    // GramJS' Forward helper carries the resolved origin entity.
+    const origin = msg.forward?.chat ?? msg.forward?.sender;
+    if (origin) {
+      id = origin.id?.toString();
+      if (origin instanceof Api.Channel) {
+        isChannel = true;
+        accessHash = origin.accessHash?.toString();
+      } else if (origin instanceof Api.User) {
+        accessHash = origin.accessHash?.toString();
+      }
+      if (!name) {
+        name =
+          origin.title ||
+          `${origin.firstName || ""} ${origin.lastName || ""}`.trim() ||
+          undefined;
+      }
+    }
+  } catch {
+    // ignore — fall through to the post-author signature
+  }
+
+  if (!name && typeof fwd.postAuthor === "string" && fwd.postAuthor.trim()) {
+    name = fwd.postAuthor.trim();
+  }
+
+  if (!name) return undefined;
+  return { name, id, accessHash, isChannel };
+}
+
 /** Map a GramJS message to the client-facing shape. */
 function mapMessage(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -200,6 +263,7 @@ function mapMessage(
     groupedId: msg.groupedId ? msg.groupedId.toString() : undefined,
     senderId: sender.id,
     senderName: sender.name,
+    forwardedFrom: extractForward(msg),
   };
 }
 

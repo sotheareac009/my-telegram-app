@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import TelegramChat from "./TelegramChat";
-import type { ChatMedia } from "@/app/api/telegram/conversation/route";
+import type {
+  ChatMedia,
+  ForwardInfo,
+} from "@/app/api/telegram/conversation/route";
 
 /** A resolved Telegram link the viewer should open. */
 export interface GroupChatTarget {
@@ -34,6 +37,7 @@ type ApiMessage = {
   groupedId?: string;
   senderId?: string;
   senderName?: string;
+  forwardedFrom?: ForwardInfo;
 };
 
 type UiMessage = {
@@ -46,6 +50,7 @@ type UiMessage = {
   groupedId?: string;
   senderId?: string;
   senderName?: string;
+  forwardedFrom?: ForwardInfo;
 };
 
 function toUi(m: ApiMessage): UiMessage {
@@ -59,6 +64,7 @@ function toUi(m: ApiMessage): UiMessage {
     groupedId: m.groupedId,
     senderId: m.senderId,
     senderName: m.senderName,
+    forwardedFrom: m.forwardedFrom,
   };
 }
 
@@ -76,10 +82,13 @@ export default function GroupChatView({
   sessionString,
   target,
   onClose,
+  onViewMedia,
 }: {
   sessionString: string;
   target: GroupChatTarget;
   onClose: () => void;
+  /** When set, the chat header shows a button to open this chat's media grid. */
+  onViewMedia?: () => void;
 }) {
   // A `user` chat is a 1-to-1 DM — addressed by userId/accessHash and always
   // sendable (no join step, no read-only state).
@@ -410,6 +419,7 @@ export default function GroupChatView({
           readOnly={!member}
           isGroup={!isUser}
           banner={member ? undefined : joinBanner}
+          onViewMedia={onViewMedia}
         />
       </div>
     </div>

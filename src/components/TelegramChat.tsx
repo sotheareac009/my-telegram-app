@@ -103,6 +103,13 @@ interface TelegramChatProps {
     onDeleteMessage?: (messageIds: string[]) => void;
     /** When provided, a "shared media" button appears in the chat header. */
     onViewMedia?: () => void;
+    /**
+     * Called once a media send completes successfully. The composer uploads
+     * the files itself (so it can show live progress on the previews) — this
+     * callback is the parent's hook to refresh the conversation. When set,
+     * the composer shows the attach button.
+     */
+    onMediaSent?: () => void;
 }
 
 /** Per-sender label colour, deterministic from the sender id. */
@@ -581,7 +588,6 @@ function MessageText({ text }: { text: string }) {
 
 // ── Sender label (group chat) ──────────────────────────────────────────────────
 function SenderLabel({ msg }: { msg: Message }) {
-    console.log("Rendering sender label for", msg);
     if (!msg.senderName) return null;
     return (
         <span
@@ -712,7 +718,6 @@ function AlbumBubble({
 
     const n = cells.length;
     const cols = n === 1 ? 1 : n === 2 || n === 4 ? 2 : 3;
-    console.log("Rendering album bubble for messages", messages);
 
     return (
         <div className={`flex ${fromMe ? "justify-end" : "justify-start"} mb-1`}>
@@ -805,7 +810,6 @@ function Bubble({
     onContextMenu?: (e: React.MouseEvent) => void;
     sessionString?: string;
 }) {
-    console.log("Rendering message", msg?.id,msg?.media,mediaUrl(msg?.id));
     const media = msg?.media;
     const showSender = isGroup && !msg?.fromMe && !!msg?.senderName;
     const metaRow = (
@@ -1055,6 +1059,119 @@ function TypingIndicator() {
     );
 }
 
+/** Thumbnail/chip for one file queued in the composer, with a remove button. */
+function FilePreview({
+    file,
+    onRemove,
+    progress,
+}: {
+    file: File;
+    onRemove: () => void;
+    /** 0..1 upload progress (or null when not uploading). */
+    progress?: number | null;
+}) {
+    const isImage = file.type.startsWith("image/");
+    const isVideo = file.type.startsWith("video/");
+    // Create/revoke the blob URL inside the effect so the pair survives
+    // Strict Mode's intentional double-mount in dev (which would otherwise
+    // revoke a `useMemo`-created URL and leave the <img> broken).
+    const [url, setUrl] = useState<string | null>(null);
+    useEffect(() => {
+        if (!isImage && !isVideo) return;
+        const u = URL.createObjectURL(file);
+        setUrl(u);
+        return () => URL.revokeObjectURL(u);
+    }, [file, isImage, isVideo]);
+
+    return (
+        <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-[#f0f2f5]">
+            {url && isImage ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                    src={url}
+                    alt={file.name}
+                    className="h-full w-full object-cover"
+                />
+            ) : url && isVideo ? (
+                <video
+                    src={url}
+                    muted
+                    playsInline
+                    preload="metadata"
+                    className="h-full w-full object-cover"
+                />
+            ) : (
+                <div className="flex h-full w-full flex-col items-center justify-center gap-0.5 p-1 text-center">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8a9aaa" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                    <span className="line-clamp-2 break-all text-[8px] leading-tight text-[#8a9aaa]">
+                        {file.name}
+                    </span>
+                </div>
+            )}
+            {isVideo && typeof progress !== "number" && (
+                <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-white shadow">
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M8 5v14l11-7z" />
+                        </svg>
+                    </span>
+                </span>
+            )}
+            {typeof progress === "number" && (
+                <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/45">
+                    <svg
+                        width="32"
+                        height="32"
+                        viewBox="0 0 36 36"
+                        className="-rotate-90"
+                    >
+                        <circle
+                            cx="18"
+                            cy="18"
+                            r="14"
+                            fill="none"
+                            stroke="rgba(255,255,255,0.25)"
+                            strokeWidth="3"
+                        />
+                        <circle
+                            cx="18"
+                            cy="18"
+                            r="14"
+                            fill="none"
+                            stroke="white"
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                            strokeDasharray={2 * Math.PI * 14}
+                            strokeDashoffset={
+                                2 *
+                                Math.PI *
+                                14 *
+                                (1 - Math.max(0, Math.min(1, progress)))
+                            }
+                            style={{ transition: "stroke-dashoffset 0.15s linear" }}
+                        />
+                    </svg>
+                </span>
+            )}
+            {typeof progress !== "number" && (
+            <button
+                type="button"
+                onClick={onRemove}
+                className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80"
+                aria-label="Remove"
+            >
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                    <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+            </button>
+            )}
+        </div>
+    );
+}
+
 // ── Main Chat Component ────────────────────────────────────────────────────────
 export default function TelegramChat({
     contact,
@@ -1071,12 +1188,20 @@ export default function TelegramChat({
     banner,
     onDeleteMessage,
     onViewMedia,
+    onMediaSent,
 }: TelegramChatProps) {
     const mediaUrl: MediaUrlFn = (messageId, opts) =>
         buildMediaUrl(sessionString, contact, messageId, isGroup, opts);
     const { startForward } = useForwardJobs();
     const [input, setInput] = useState("");
     const [isTyping, setIsTyping] = useState(false);
+    // Media files queued in the composer, awaiting send.
+    const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+    const [sendingMedia, setSendingMedia] = useState(false);
+    // Upload progress (0..1) while sendingMedia is true. Driven by gramjs'
+    // progressCallback via the route's NDJSON stream.
+    const [sendProgress, setSendProgress] = useState<number | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     // Full-screen media viewer state — null when closed.
     const [viewer, setViewer] = useState<{
         items: ViewerItem[];
@@ -1173,7 +1298,6 @@ export default function TelegramChat({
     const scrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const grouped = groupMessagesByDate(messages);
-    console.log("Grouped messages:", grouped,messages);
 
     // Scroll behaviour:
     //  - atBottomRef: is the user parked near the bottom of the history?
@@ -1256,7 +1380,28 @@ export default function TelegramChat({
         e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
     }
 
-    function handleSend() {
+    async function handleSend() {
+        // Queued media takes priority — the text box becomes its caption.
+        if (pendingFiles.length > 0) {
+            if (sendingMedia || !onMediaSent || !sessionString) return;
+            setSendingMedia(true);
+            setSendProgress(0);
+            forceScrollRef.current = true;
+            try {
+                await uploadMedia(pendingFiles, input.trim());
+                setPendingFiles([]);
+                setInput("");
+                if (inputRef.current) inputRef.current.style.height = "auto";
+                onMediaSent?.();
+            } catch (err) {
+                // Files stay queued so the user can retry.
+                console.error("[send-media]", err);
+            } finally {
+                setSendingMedia(false);
+                setSendProgress(null);
+            }
+            return;
+        }
         const text = input.trim();
         if (!text) return;
         // Reveal the user's own message even if they were reading history.
@@ -1266,6 +1411,81 @@ export default function TelegramChat({
         if (inputRef.current) {
             inputRef.current.style.height = "auto";
         }
+    }
+
+    /**
+     * Upload media files to the open chat, streaming progress events from the
+     * route into `sendProgress`. Throws on any failure so the caller knows to
+     * keep the files queued and surface the error.
+     */
+    async function uploadMedia(files: File[], caption: string) {
+        const form = new FormData();
+        form.set("sessionString", sessionString);
+        if (isGroup) {
+            form.set("chatId", contact.id);
+        } else {
+            form.set("userId", contact.id);
+            if (contact.accessHash) form.set("accessHash", contact.accessHash);
+        }
+        form.set("caption", caption);
+        for (const f of files) form.append("files", f);
+
+        const res = await fetch("/api/telegram/send-media", {
+            method: "POST",
+            body: form,
+        });
+        if (!res.ok || !res.body) {
+            const data = await res.json().catch(() => null);
+            throw new Error(data?.error || `Upload failed (HTTP ${res.status})`);
+        }
+
+        // NDJSON stream: progress events + a final done/error event.
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        let errorMessage: string | null = null;
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            let nl: number;
+            while ((nl = buf.indexOf("\n")) !== -1) {
+                const line = buf.slice(0, nl).trim();
+                buf = buf.slice(nl + 1);
+                if (!line) continue;
+                let event: { kind?: string; percent?: number; message?: string };
+                try {
+                    event = JSON.parse(line);
+                } catch {
+                    continue;
+                }
+                if (
+                    event.kind === "progress" &&
+                    typeof event.percent === "number"
+                ) {
+                    setSendProgress(event.percent);
+                } else if (
+                    event.kind === "error" &&
+                    typeof event.message === "string"
+                ) {
+                    errorMessage = event.message;
+                }
+            }
+        }
+        if (errorMessage) throw new Error(errorMessage);
+    }
+
+    function handleFilesPicked(e: React.ChangeEvent<HTMLInputElement>) {
+        const picked = Array.from(e.target.files ?? []);
+        if (picked.length > 0) {
+            setPendingFiles((prev) => [...prev, ...picked].slice(0, 10));
+        }
+        // Reset so re-picking the same file still fires onChange.
+        e.target.value = "";
+    }
+
+    function removeFile(index: number) {
+        setPendingFiles((prev) => prev.filter((_, i) => i !== index));
     }
 
     function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -1585,7 +1805,30 @@ export default function TelegramChat({
                 </div>
             ) : readOnly ? null : (
             /* ── Input Bar ── */
-            <div className="shrink-0 px-3 py-2 bg-white border-t border-gray-200 flex items-end gap-2 w-[550px] mx-auto rounded-2xl">
+            <div className="shrink-0 px-3 py-2 bg-white border-t border-gray-200 w-[550px] mx-auto rounded-2xl">
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    onChange={handleFilesPicked}
+                    className="hidden"
+                />
+                {/* Queued media — thumbnails awaiting send */}
+                {pendingFiles.length > 0 && (
+                    <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
+                        {pendingFiles.map((f, i) => (
+                            <FilePreview
+                                key={`${f.name}-${f.size}-${i}`}
+                                file={f}
+                                onRemove={() => removeFile(i)}
+                                progress={
+                                    sendingMedia ? (sendProgress ?? 0) : null
+                                }
+                            />
+                        ))}
+                    </div>
+                )}
+                <div className="flex items-end gap-2">
                 {/* emoji button */}
                 <button className="text-[#8a9aaa] hover:text-[#3390ec] transition-colors p-2 rounded-full hover:bg-[#3390ec]/10 shrink-0 mb-0.5">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
@@ -1604,31 +1847,43 @@ export default function TelegramChat({
                         value={input}
                         onChange={handleInput}
                         onKeyDown={handleKeyDown}
-                        placeholder="Message"
+                        placeholder={
+                            pendingFiles.length > 0 ? "Add a caption…" : "Message"
+                        }
                         className="flex-1 bg-transparent text-[#111] placeholder-[#aab8c2] text-sm resize-none outline-none leading-relaxed max-h-[120px] overflow-y-auto"
                         style={{ scrollbarWidth: "none" }}
                     />
                     {/* attach button */}
-                    <button className="text-[#8a9aaa] hover:text-[#3390ec] transition-colors shrink-0 mb-0.5">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                    </button>
+                    {onMediaSent && (
+                        <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            title="Attach photos, videos or files"
+                            className="text-[#8a9aaa] hover:text-[#3390ec] transition-colors shrink-0 mb-0.5"
+                        >
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                        </button>
+                    )}
                 </div>
 
                 {/* send / mic button */}
                 <button
                     onClick={handleSend}
+                    disabled={sendingMedia}
                     className={`
                         w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all duration-200 mb-0.5
-                        ${input.trim()
+                        ${input.trim() || pendingFiles.length > 0
                             ? "bg-[#3390ec] text-white shadow-lg shadow-[#3390ec]/30 scale-100 hover:scale-105"
                             : "bg-[#f0f2f5] text-[#8a9aaa]"
                         }
                     `}
                     aria-label="Send"
                 >
-                    {input.trim() ? (
+                    {sendingMedia ? (
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    ) : input.trim() || pendingFiles.length > 0 ? (
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                             <path d="M22 2L11 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                             <path d="M22 2L15 22l-4-9-9-4 20-7z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -1642,6 +1897,7 @@ export default function TelegramChat({
                         </svg>
                     )}
                 </button>
+                </div>
             </div>
             )}
         </div>

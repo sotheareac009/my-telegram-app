@@ -94,8 +94,11 @@ export default function GroupChatView({
   // sendable (no join step, no read-only state).
   const isUser = target.kind === "user";
   const [chatId, setChatId] = useState<string | undefined>(target.id);
-  const [member, setMember] = useState<boolean>(
-    isUser || (target.isMember ?? false),
+  // true | false | "pending" — "pending" while a membership check is still in
+  // flight (a forward-origin chat opened without known membership), so the
+  // Join button doesn't flash before the real answer arrives.
+  const [member, setMember] = useState<boolean | "pending">(
+    isUser ? true : (target.isMember ?? "pending"),
   );
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -120,17 +123,22 @@ export default function GroupChatView({
                   userId: id,
                   accessHash: target.accessHash,
                   limit: 60,
+                  initial,
                 }
               : {
                   sessionString,
                   chatId: id,
                   accessHash: target.accessHash,
                   limit: 60,
+                  initial,
                 },
           ),
         });
         const data = await res.json();
         if (activeRef.current !== id) return;
+        // The route reports membership on initial load — used to hide the
+        // Join button when the account is already in the chat.
+        if (typeof data.isMember === "boolean") setMember(data.isMember);
         if (Array.isArray(data.messages)) {
           setMessages((prev) =>
             merge(prev, (data.messages as ApiMessage[]).map(toUi)),
@@ -230,6 +238,14 @@ export default function GroupChatView({
     } catch {
       // ignore — the poll will pick the message up if it actually sent
     }
+  }
+
+  // Pull the just-sent media in immediately (TelegramChat handles the upload
+  // itself so it can show live progress on the preview thumbnails).
+  function handleMediaSent() {
+    const id = chatId;
+    if (!id || activeRef.current !== id) return;
+    void loadConversation(id, false);
   }
 
   // Delete one or more messages. Telegram enforces permissions server-side, so
@@ -410,11 +426,13 @@ export default function GroupChatView({
         <TelegramChat
           contact={{
             id: chatId,
+            accessHash: isUser ? target.accessHash : undefined,
             firstName: target.title,
             lastSeen: isUser ? undefined : isChannel ? "Channel" : "Group",
           }}
           messages={messages}
           onSendMessage={handleSend}
+          onMediaSent={handleMediaSent}
           onDeleteMessage={handleDelete}
           onBack={onClose}
           isLoading={loading}
@@ -422,9 +440,9 @@ export default function GroupChatView({
           hasMoreOlder={hasMoreOlder}
           loadingOlder={loadingOlder}
           sessionString={sessionString}
-          readOnly={!member}
+          readOnly={member !== true}
           isGroup={!isUser}
-          banner={member ? undefined : joinBanner}
+          banner={member === false ? joinBanner : undefined}
           onViewMedia={onViewMedia}
         />
       </div>

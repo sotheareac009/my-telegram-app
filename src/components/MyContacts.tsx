@@ -32,6 +32,29 @@ type ChatContact = {
     lastSeen?: string | null;
 };
 
+const SELECTED_CHAT_KEY = "telegram-contacts-selected-chat";
+
+/** Restore the chat that was open before a refresh, if one was persisted. */
+function readStoredChat(): ChatContact | null {
+    if (typeof window === "undefined") return null;
+    try {
+        const raw = window.localStorage.getItem(SELECTED_CHAT_KEY);
+        if (!raw) return null;
+        const p = JSON.parse(raw);
+        if (
+            p &&
+            typeof p.id === "string" &&
+            typeof p.accessHash === "string" &&
+            typeof p.firstName === "string"
+        ) {
+            return p as ChatContact;
+        }
+    } catch {
+        // ignore
+    }
+    return null;
+}
+
 /** Chat message shape consumed by <TelegramChat>. */
 type ChatUiMessage = {
     id: string;
@@ -95,15 +118,31 @@ function getAvatarGradient(name: string) {
     return AVATAR_GRADIENTS[Math.abs(hash) % AVATAR_GRADIENTS.length];
 }
 
-function ContactAvatar({ contact, name, gradient }: { contact: Contact; name: string; gradient: string }) {
+function ContactAvatar({
+    contact,
+    name,
+    gradient,
+    size = "md",
+    className = "",
+}: {
+    contact: Contact;
+    name: string;
+    gradient: string;
+    size?: "md" | "lg";
+    className?: string;
+}) {
     const [imgError, setImgError] = useState(false);
+    const dims = size === "lg" ? "w-14 h-14" : "w-10 h-10";
+    const text = size === "lg" ? "text-xl" : "text-[15px]";
     return (
-        <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${gradient} flex items-center justify-center text-white font-semibold text-[15px] shrink-0 shadow-sm overflow-hidden`}>
+        <div
+            className={`${dims} rounded-full bg-gradient-to-br ${gradient} flex items-center justify-center text-white font-semibold ${text} shrink-0 shadow-sm overflow-hidden ${className}`}
+        >
             {contact.photo && !imgError ? (
                 <img
                     src={contact.photo}
                     alt={contact.firstName}
-                    className="w-10 h-10 rounded-full object-cover"
+                    className={`${dims} rounded-full object-cover`}
                     onError={() => setImgError(true)}
                 />
             ) : (
@@ -132,7 +171,9 @@ export default function MyContacts({
     const [searchInput, setSearchInput] = useState("");
 
     // ── Chat state ──
-    const [selectedContact, setSelectedContact] = useState<ChatContact | null>(null);
+    const [selectedContact, setSelectedContact] = useState<ChatContact | null>(
+        readStoredChat,
+    );
     const [messages, setMessages] = useState<ChatUiMessage[]>([]);
     const [messagesLoading, setMessagesLoading] = useState(false);
     const [hasMoreOlder, setHasMoreOlder] = useState(true);
@@ -246,6 +287,14 @@ export default function MyContacts({
         }
     }
 
+    /** Pull the just-sent media in immediately (TelegramChat handles the
+     * upload itself so it can show live progress on the previews). */
+    function handleMediaSent() {
+        const c = selectedContact;
+        if (!c || activeChatIdRef.current !== c.id) return;
+        void loadConversation(c.id, c.accessHash, false);
+    }
+
     // Live updates: poll the open conversation every 3s. The ref keeps the
     // interval stable while always calling the latest closure.
     const pollRef = useRef<() => void>(() => {});
@@ -264,6 +313,32 @@ export default function MyContacts({
         const interval = setInterval(() => pollRef.current(), 3000);
         return () => clearInterval(interval);
     }, [selectedContact?.id]);
+
+    // Persist the open chat so a page refresh restores it.
+    useEffect(() => {
+        try {
+            if (selectedContact) {
+                window.localStorage.setItem(
+                    SELECTED_CHAT_KEY,
+                    JSON.stringify(selectedContact),
+                );
+            } else {
+                window.localStorage.removeItem(SELECTED_CHAT_KEY);
+            }
+        } catch {
+            // ignore
+        }
+    }, [selectedContact]);
+
+    // On mount, load the conversation for a chat restored after a refresh.
+    // Skipped when `initialChat` is set — a contact-share/link click wins.
+    useEffect(() => {
+        const c = selectedContact;
+        if (!c || initialChat) return;
+        activeChatIdRef.current = c.id;
+        void loadConversation(c.id, c.accessHash, true);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     async function openChat(contact: Contact) {
         // optimistically show chat immediately with basic info
@@ -364,6 +439,7 @@ export default function MyContacts({
                                 contact={selectedContact}
                                 messages={messages}
                                 onSendMessage={handleSendMessage}
+                                onMediaSent={handleMediaSent}
                                 isLoading={messagesLoading}
                                 onLoadOlder={loadOlder}
                                 hasMoreOlder={hasMoreOlder}
@@ -501,9 +577,13 @@ export default function MyContacts({
                                     onClick={() => openChat(contact)}
                                     className="bg-white border border-stone-200 rounded-2xl p-4 text-center cursor-pointer hover:-translate-y-0.5 hover:shadow-md hover:shadow-stone-200/80 hover:border-stone-300 transition-all duration-150"
                                 >
-                                    <div className={`w-14 h-14 rounded-full bg-gradient-to-br ${gradient} flex items-center justify-center text-white font-semibold text-xl mx-auto mb-3 shadow-sm`}>
-                                        {name.charAt(0).toUpperCase()}
-                                    </div>
+                                    <ContactAvatar
+                                        contact={contact}
+                                        name={name}
+                                        gradient={gradient}
+                                        size="lg"
+                                        className="mx-auto mb-3"
+                                    />
                                     <p className="text-[13px] font-medium text-stone-800 truncate leading-tight">
                                         {name}
                                     </p>

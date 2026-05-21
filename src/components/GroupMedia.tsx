@@ -547,7 +547,6 @@ export default function GroupMedia({
   const initialTab = readStoredMediaTab();
   const initialCacheKey = getCacheKey(groupId, initialTab);
   const initialCache = mediaCache[initialCacheKey];
-  console.log("Rendering GroupMedia with props:", { groupTitle, destinationChats });
   const [loading, setLoading] = useState(initialCache === undefined);
   const [loadingMore, setLoadingMore] = useState(false);
   const [tab, setTab] = useState<TabId>(readStoredMediaTab);

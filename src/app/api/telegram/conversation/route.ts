@@ -279,7 +279,7 @@ function mapMessage(
 }
 
 export async function POST(request: Request) {
-  const { sessionString, userId, accessHash, chatId, limit, offsetId } =
+  const { sessionString, userId, accessHash, chatId, limit, offsetId, initial } =
     await request.json();
   if (typeof sessionString !== "string" || !sessionString) {
     return Response.json({ error: "Missing sessionString" }, { status: 400 });
@@ -348,7 +348,25 @@ export async function POST(request: Request) {
       if (m) mapped.push(m);
     }
 
-    return Response.json({ messages: mapped });
+    // On the first load of a channel reached by access hash (a forward
+    // origin), report whether the account is already a member so the chat can
+    // hide its Join button. `left` is set when the account isn't a member.
+    let isMember: boolean | undefined;
+    if (initial && isGroup && accessHash) {
+      try {
+        const entity = await client.getEntity(peer);
+        if (
+          entity instanceof Api.Channel ||
+          entity instanceof Api.Chat
+        ) {
+          isMember = !entity.left;
+        }
+      } catch {
+        // ignore — leave membership unknown
+      }
+    }
+
+    return Response.json({ messages: mapped, isMember });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to load conversation";

@@ -261,7 +261,6 @@ export default function GroupsGrid({
         <div className="flex shrink-0 items-center justify-center gap-1.5 border-t border-zinc-200/80 bg-white/80 px-4 py-3 backdrop-blur-sm dark:border-zinc-800/80 dark:bg-zinc-950/80">
           <button
             onClick={() => {
-              console.log(`Pagination clicked: previous for ${title.toLowerCase()}`);
               onPageChange(Math.max(1, page - 1));
             }}
             disabled={page === 1}
@@ -273,7 +272,6 @@ export default function GroupsGrid({
             <button
               key={i}
               onClick={() => {
-                console.log(`Pagination clicked for ${title.toLowerCase()} page ${i + 1}`);
                 onPageChange(i + 1);
               }}
               className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[13px] font-semibold transition-colors ${
@@ -287,7 +285,6 @@ export default function GroupsGrid({
           ))}
           <button
             onClick={() => {
-              console.log(`Pagination clicked: next for ${title.toLowerCase()}`);
               onPageChange(Math.min(totalPages, page + 1));
             }}
             disabled={page === totalPages}

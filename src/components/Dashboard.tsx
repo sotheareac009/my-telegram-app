@@ -25,7 +25,26 @@ const ACTIVE_FOLDER_STORAGE_KEY = "telegram-active-folder";
 const PAGE_STORAGE_KEY = "telegram-page";
 const SCROLL_STORAGE_KEY = "telegram-scroll";
 const SELECTED_GROUP_STORAGE_KEY = "telegram-selected-group";
-const VALID_MENUS = ["home", "groups", "channels", "queue"] as const;
+const GROUP_VIEW_STORAGE_KEY = "telegram-group-view";
+const VALID_MENUS = [
+  "home",
+  "groups",
+  "channels",
+  "queue",
+  "my-contacts",
+  "recent-chats",
+] as const;
+
+function readStoredGroupView(): "chat" | "media" {
+  if (typeof window === "undefined") return "chat";
+  try {
+    const v = window.localStorage.getItem(GROUP_VIEW_STORAGE_KEY);
+    if (v === "chat" || v === "media") return v;
+  } catch {
+    // ignore
+  }
+  return "chat";
+}
 
 function readStoredSelectedGroup(): GroupInfo | null {
   if (typeof window === "undefined") return null;
@@ -175,14 +194,18 @@ export default function Dashboard({
   }, [selectedGroup]);
   // Which sub-view a selected group/channel opens in. Defaults to the chat —
   // the media grid is reached via a header button, like the Telegram app.
-  const [groupView, setGroupView] = useState<"chat" | "media">("chat");
-  console.log(
-    "Rendering Dashboard with session:",
-    session,
-    user,
-    accounts,
-    currentAccountId,
+  // Persisted so a refresh restores chat-vs-media along with the open group.
+  const [groupView, setGroupView] = useState<"chat" | "media">(
+    readStoredGroupView,
   );
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(GROUP_VIEW_STORAGE_KEY, groupView);
+    } catch {
+      // ignore
+    }
+  }, [groupView]);
   const [activeFolderByType, setActiveFolderByType] = useState<FolderByType>(
     () =>
       readStoredJSON<FolderByType>(
@@ -307,16 +330,6 @@ export default function Dashboard({
       scrollRestoredRef.current = true;
     });
   }, [activeMenu, selectedGroup, groupsCache, foldersCache]);
-
-  console.log("Dashboard state:", {
-    activeMenu,
-    selectedGroup,
-    activeFolderByType,
-    pageByType,
-    groupsCache,
-    foldersCache,
-    mediaCache,
-  });
 
   const handleGroupsLoaded = useCallback((groups: Group[]) => {
     setGroupsCache(groups);

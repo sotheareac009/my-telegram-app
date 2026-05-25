@@ -235,7 +235,9 @@ export async function POST(request: Request) {
             const stat = await fsp.stat(filePath);
             const name = basename(filePath);
 
-            // 1. Upload the file bytes → InputFile/InputFileBig.
+            // 1. Upload the file bytes → InputFile/InputFileBig. Progress is
+            // emitted per-file (with index) so the outgoing bubble can show
+            // the correct percentage on each tile.
             const fileHandle = await client.uploadFile({
               file: new telegramClient.uploads.CustomFile(
                 name,
@@ -244,11 +246,7 @@ export async function POST(request: Request) {
               ),
               workers: 1,
               onProgress: (p: number) => {
-                // Aggregate file progress across the album.
-                emit({
-                  kind: "progress",
-                  percent: (i + p) / safeUploads.length,
-                });
+                emit({ kind: "progress", index: i, percent: p });
               },
             });
 

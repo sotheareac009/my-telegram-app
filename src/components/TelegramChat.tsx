@@ -198,6 +198,48 @@ async function extractVideoThumb(
     });
 }
 
+/** One queued/uploading attachment, with the poster + per-file progress that
+ * the outgoing bubble needs to render Telegram-Web-style during a send. */
+interface UploadingItem {
+    uploadId: string;
+    file: File;
+    /** The image we render in the bubble — blob URL for images, captured
+     * poster data URL for videos. */
+    previewUrl: string;
+    /** Set when we created previewUrl ourselves and need to revoke it. */
+    revokeOnDone: boolean;
+    isVideo: boolean;
+    width?: number;
+    height?: number;
+    duration?: number;
+    /** Captured video poster data URL (also goes to the server as `thumb`). */
+    thumb?: string;
+    progress: number;
+}
+
+/** Decode an image file enough to learn its real width / height. Used so the
+ * outgoing bubble can size itself like the sent message will. */
+async function measureImage(
+    file: File,
+): Promise<{ width: number; height: number } | null> {
+    if (typeof document === "undefined") return null;
+    return new Promise((resolve) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+            const w = img.naturalWidth || 0;
+            const h = img.naturalHeight || 0;
+            URL.revokeObjectURL(url);
+            resolve(w && h ? { width: w, height: h } : null);
+        };
+        img.onerror = () => {
+            URL.revokeObjectURL(url);
+            resolve(null);
+        };
+        img.src = url;
+    });
+}
+
 /** Build a chat-media stream URL for a message attachment. */
 function buildMediaUrl(
     sessionString: string,
@@ -1115,6 +1157,177 @@ function DateDivider({ label }: { label: string }) {
     );
 }
 
+// ── Outgoing media bubble (while uploading) ────────────────────────────────────
+/**
+ * Telegram-Web-style bubble that takes over from the composer chips once a send
+ * starts. Each tile shows the file's preview (image blob URL, or the captured
+ * video poster) full-size with a centered circular progress + cancel overlay
+ * and the percentage in the corner. The whole thing lives at the end of the
+ * messages list so the regular auto-scroll already keeps it in view.
+ */
+function OutgoingMediaBubble({
+    items,
+    caption,
+    onCancel,
+}: {
+    items: UploadingItem[];
+    caption: string;
+    onCancel?: () => void;
+}) {
+    if (items.length === 0) return null;
+    const n = items.length;
+    const cols = n === 1 ? 1 : n === 2 || n === 4 ? 2 : 3;
+    // Match the sent-message layout: single tile uses the file's real aspect
+    // via mediaBox (the same helper Bubble uses on the message-side), albums
+    // get a fixed 280px-wide grid like AlbumBubble.
+    let containerStyle: React.CSSProperties;
+    if (n === 1) {
+        const box = mediaBox(items[0].width, items[0].height);
+        containerStyle = { width: box.width };
+    } else {
+        containerStyle = { width: 280 };
+    }
+    return (
+        <div className="flex justify-end mb-1">
+            <div
+                className="relative overflow-hidden rounded-2xl rounded-br-sm bg-[#effdde] p-1 text-sm shadow-sm"
+                style={containerStyle}
+            >
+                <div
+                    className="grid gap-0.5 overflow-hidden rounded-lg"
+                    style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}
+                >
+                    {items.map((it) => (
+                        <UploadingTile
+                            key={it.uploadId}
+                            item={it}
+                            single={n === 1}
+                            onCancel={onCancel}
+                        />
+                    ))}
+                </div>
+                {caption && (
+                    <span
+                        className="mt-1 block px-2 pb-0.5"
+                        style={{ wordBreak: "break-word" }}
+                    >
+                        <MessageText text={caption} />
+                    </span>
+                )}
+                <span className="block px-2 pb-1 text-right text-[10px] leading-none text-[#aab8c2] select-none">
+                    {formatTime(new Date())}
+                    <svg
+                        className="ml-0.5 inline-block align-middle"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                    >
+                        <circle cx="12" cy="12" r="9" />
+                        <polyline points="12 7 12 12 15 14" />
+                    </svg>
+                </span>
+            </div>
+        </div>
+    );
+}
+
+function UploadingTile({
+    item,
+    single,
+    onCancel,
+}: {
+    item: UploadingItem;
+    single: boolean;
+    onCancel?: () => void;
+}) {
+    const pct = Math.round(item.progress * 100);
+    // Single tile: the parent container is already sized via mediaBox, so the
+    // tile just fills it and the poster lays out at the file's real aspect.
+    // Album tiles: square, matching AlbumBubble.
+    const tileStyle: React.CSSProperties = single
+        ? {
+              width: "100%",
+              aspectRatio:
+                  item.width && item.height
+                      ? `${item.width} / ${item.height}`
+                      : "16 / 9",
+          }
+        : { width: "100%", aspectRatio: "1 / 1" };
+    return (
+        <div
+            className="relative overflow-hidden bg-black"
+            style={tileStyle}
+        >
+            <img
+                src={item.previewUrl}
+                alt={item.isVideo ? "Video" : "Photo"}
+                className="absolute inset-0 h-full w-full object-cover"
+                draggable={false}
+            />
+            <span className="pointer-events-none absolute left-2 top-1.5 z-10 text-[12px] font-medium text-white drop-shadow">
+                {pct}%
+            </span>
+            <button
+                type="button"
+                onClick={onCancel}
+                disabled={!onCancel}
+                aria-label="Cancel upload"
+                className="absolute left-1/2 top-1/2 z-10 flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center"
+            >
+                {/* Dim backdrop behind the ring + icon */}
+                <span className="absolute inset-0 rounded-full bg-black/45" />
+                {/* Progress ring around the X */}
+                <svg
+                    width="48"
+                    height="48"
+                    viewBox="0 0 48 48"
+                    className="absolute inset-0 -rotate-90"
+                >
+                    <circle
+                        cx="24"
+                        cy="24"
+                        r="21"
+                        fill="none"
+                        stroke="rgba(255,255,255,0.3)"
+                        strokeWidth="2.5"
+                    />
+                    <circle
+                        cx="24"
+                        cy="24"
+                        r="21"
+                        fill="none"
+                        stroke="white"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeDasharray={2 * Math.PI * 21}
+                        strokeDashoffset={
+                            2 * Math.PI * 21 * (1 - Math.max(0, Math.min(1, item.progress)))
+                        }
+                        style={{ transition: "stroke-dashoffset 0.15s linear" }}
+                    />
+                </svg>
+                <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="white"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    className="relative"
+                >
+                    <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+    );
+}
+
 // ── Typing Indicator ───────────────────────────────────────────────────────────
 function TypingIndicator() {
     return (
@@ -1271,9 +1484,18 @@ export default function TelegramChat({
     // Media files queued in the composer, awaiting send.
     const [pendingFiles, setPendingFiles] = useState<File[]>([]);
     const [sendingMedia, setSendingMedia] = useState(false);
-    // Upload progress (0..1) while sendingMedia is true. Driven by gramjs'
-    // progressCallback via the route's NDJSON stream.
-    const [sendProgress, setSendProgress] = useState<number | null>(null);
+    // Per-file state for the in-flight album. Driven by uploadMedia — replaces
+    // the old single `sendProgress` so the outgoing bubble can show each tile's
+    // own poster + percentage the way Telegram Web does.
+    const [uploadingItems, setUploadingItems] = useState<UploadingItem[]>([]);
+    const updateUploadProgress = (uploadId: string, progress: number) =>
+        setUploadingItems((prev) =>
+            prev.map((it) =>
+                it.uploadId === uploadId
+                    ? { ...it, progress: Math.max(it.progress, progress) }
+                    : it,
+            ),
+        );
     const fileInputRef = useRef<HTMLInputElement>(null);
     // Full-screen media viewer state — null when closed.
     const [viewer, setViewer] = useState<{
@@ -1457,11 +1679,54 @@ export default function TelegramChat({
         // Queued media takes priority — the text box becomes its caption.
         if (pendingFiles.length > 0) {
             if (sendingMedia || !onMediaSent || !sessionString) return;
+
+            // Extract posters + dimensions upfront so the outgoing bubble can
+            // render Telegram-Web-style during the upload rather than waiting
+            // for the conversation refresh after send.
+            const items: UploadingItem[] = await Promise.all(
+                pendingFiles.map(async (f) => {
+                    const isVideo = f.type.startsWith("video/");
+                    const isImage = f.type.startsWith("image/");
+                    const thumb = isVideo ? await extractVideoThumb(f) : null;
+                    // Need the real width/height to size the outgoing bubble
+                    // the same way the sent message will end up (mediaBox).
+                    const meta = thumb
+                        ? { width: thumb.width, height: thumb.height }
+                        : isImage
+                            ? await measureImage(f)
+                            : null;
+                    // Use the captured poster when we have one (sharper, smaller);
+                    // fall back to a blob URL so images and undecodable videos
+                    // still get a preview.
+                    let previewUrl: string;
+                    let revokeOnDone: boolean;
+                    if (thumb) {
+                        previewUrl = thumb.dataUrl;
+                        revokeOnDone = false;
+                    } else {
+                        previewUrl = URL.createObjectURL(f);
+                        revokeOnDone = true;
+                    }
+                    return {
+                        uploadId: crypto.randomUUID(),
+                        file: f,
+                        previewUrl,
+                        revokeOnDone,
+                        isVideo,
+                        width: meta?.width,
+                        height: meta?.height,
+                        duration: thumb?.duration,
+                        thumb: thumb?.dataUrl,
+                        progress: 0,
+                    };
+                }),
+            );
+
+            setUploadingItems(items);
             setSendingMedia(true);
-            setSendProgress(0);
             forceScrollRef.current = true;
             try {
-                await uploadMedia(pendingFiles, input.trim());
+                await uploadMedia(items, input.trim());
                 setPendingFiles([]);
                 setInput("");
                 if (inputRef.current) inputRef.current.style.height = "auto";
@@ -1470,8 +1735,12 @@ export default function TelegramChat({
                 // Files stay queued so the user can retry.
                 console.error("[send-media]", err);
             } finally {
+                // Revoke any blob URLs we created so we don't leak.
+                for (const it of items) {
+                    if (it.revokeOnDone) URL.revokeObjectURL(it.previewUrl);
+                }
                 setSendingMedia(false);
-                setSendProgress(null);
+                setUploadingItems([]);
             }
             return;
         }
@@ -1487,49 +1756,31 @@ export default function TelegramChat({
     }
 
     /**
-     * Upload media files to the open chat, streaming progress events from the
-     * route into `sendProgress`. Throws on any failure so the caller knows to
-     * keep the files queued and surface the error.
+     * Upload the prepared `UploadingItem`s to the open chat, streaming progress
+     * events from the route into per-item state. Throws on any failure so the
+     * caller knows to keep the files queued and surface the error.
      */
-    async function uploadMedia(files: File[], caption: string) {
+    async function uploadMedia(items: UploadingItem[], caption: string) {
         // Chunked upload: split each file into 2 MB pieces and POST one piece
         // per request. Avoids the body-size cap that 17 MB+ multipart bodies
         // were hitting (same idea as Telegram Web's protocol-level chunking,
         // just via plain HTTP since the bytes still have to reach our server).
         const CHUNK_SIZE = 2 * 1024 * 1024;
 
-        // For videos, extract a poster frame in the browser — gramjs' metadata
-        // extraction is a no-op so without this Telegram has no thumb to serve
-        // and the chat bubble ends up as a broken-image placeholder.
-        const uploads = await Promise.all(
-            files.map(async (f) => ({
-                uploadId: crypto.randomUUID(),
-                filename: f.name || "file",
-                file: f,
-                thumb: f.type.startsWith("video/")
-                    ? await extractVideoThumb(f)
-                    : null,
-            })),
-        );
-
-        const totalChunks = uploads.reduce(
-            (sum, u) => sum + Math.max(1, Math.ceil(u.file.size / CHUNK_SIZE)),
-            0,
-        );
-        let sentChunks = 0;
-
         // ── Phase 1: ship each file's chunks to the staging endpoint. ──
-        for (const up of uploads) {
-            const total = Math.max(1, Math.ceil(up.file.size / CHUNK_SIZE));
+        // Phase 1 fills the first half of each item's progress (0 → 0.5);
+        // phase 2 (gramjs upload to Telegram) fills the second half.
+        for (const it of items) {
+            const total = Math.max(1, Math.ceil(it.file.size / CHUNK_SIZE));
             for (let i = 0; i < total; i++) {
                 const start = i * CHUNK_SIZE;
-                const end = Math.min(start + CHUNK_SIZE, up.file.size);
-                const chunk = up.file.slice(start, end);
+                const end = Math.min(start + CHUNK_SIZE, it.file.size);
+                const chunk = it.file.slice(start, end);
                 const res = await fetch("/api/telegram/upload-chunk", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/octet-stream",
-                        "X-Upload-Id": up.uploadId,
+                        "X-Upload-Id": it.uploadId,
                         "X-Chunk-Index": String(i),
                     },
                     body: chunk,
@@ -1540,9 +1791,7 @@ export default function TelegramChat({
                         data?.error || `Chunk upload failed (HTTP ${res.status})`,
                     );
                 }
-                sentChunks++;
-                // Phase 1 fills the first half of the progress bar (0 → 0.5).
-                setSendProgress((sentChunks / totalChunks) * 0.5);
+                updateUploadProgress(it.uploadId, ((i + 1) / total) * 0.5);
             }
         }
 
@@ -1557,15 +1806,15 @@ export default function TelegramChat({
                 accessHash:
                     isGroup || !contact.accessHash ? undefined : contact.accessHash,
                 caption,
-                uploads: uploads.map((u) => ({
-                    uploadId: u.uploadId,
-                    filename: u.filename,
+                uploads: items.map((it) => ({
+                    uploadId: it.uploadId,
+                    filename: it.file.name || "file",
                     // Optional poster frame + measured dimensions for videos.
-                    thumb: u.thumb?.dataUrl,
-                    width: u.thumb?.width,
-                    height: u.thumb?.height,
-                    duration: u.thumb?.duration,
-                    mimeType: u.file.type || undefined,
+                    thumb: it.thumb,
+                    width: it.width,
+                    height: it.height,
+                    duration: it.duration,
+                    mimeType: it.file.type || undefined,
                 })),
             }),
         });
@@ -1576,7 +1825,9 @@ export default function TelegramChat({
             );
         }
 
-        // Stream gramjs upload progress for phase 2 (0.5 → 1.0).
+        // Stream gramjs upload progress for phase 2 (0.5 → 1.0). The server
+        // emits per-file events with an `index` for albums; single-file sends
+        // and unknown indices fall back to the first item.
         const reader = sendRes.body.getReader();
         const decoder = new TextDecoder();
         let buf = "";
@@ -1590,7 +1841,12 @@ export default function TelegramChat({
                 const line = buf.slice(0, nl).trim();
                 buf = buf.slice(nl + 1);
                 if (!line) continue;
-                let event: { kind?: string; percent?: number; message?: string };
+                let event: {
+                    kind?: string;
+                    percent?: number;
+                    index?: number;
+                    message?: string;
+                };
                 try {
                     event = JSON.parse(line);
                 } catch {
@@ -1600,9 +1856,17 @@ export default function TelegramChat({
                     event.kind === "progress" &&
                     typeof event.percent === "number"
                 ) {
-                    setSendProgress(
-                        0.5 + Math.max(0, Math.min(1, event.percent)) * 0.5,
-                    );
+                    const clamped = Math.max(0, Math.min(1, event.percent));
+                    const next = 0.5 + clamped * 0.5;
+                    if (typeof event.index === "number") {
+                        const target = items[event.index];
+                        if (target) updateUploadProgress(target.uploadId, next);
+                    } else {
+                        // Single-file path: only one item to attribute to.
+                        for (const it of items) {
+                            updateUploadProgress(it.uploadId, next);
+                        }
+                    }
                 } else if (
                     event.kind === "error" &&
                     typeof event.message === "string"
@@ -1768,6 +2032,12 @@ export default function TelegramChat({
                         ))}
                         {isTyping && <TypingIndicator />}
                     </>
+                )}
+                {sendingMedia && uploadingItems.length > 0 && (
+                    <OutgoingMediaBubble
+                        items={uploadingItems}
+                        caption={input.trim()}
+                    />
                 )}
                 <div ref={bottomRef} />
             </div>
@@ -1952,17 +2222,17 @@ export default function TelegramChat({
                     onChange={handleFilesPicked}
                     className="hidden"
                 />
-                {/* Queued media — thumbnails awaiting send */}
-                {pendingFiles.length > 0 && (
+                {/* Queued media — small chips while waiting to send. Once the
+                    send starts, the chips hide and the in-flight items render
+                    as an outgoing bubble at the bottom of the chat instead. */}
+                {pendingFiles.length > 0 && !sendingMedia && (
                     <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
                         {pendingFiles.map((f, i) => (
                             <FilePreview
                                 key={`${f.name}-${f.size}-${i}`}
                                 file={f}
                                 onRemove={() => removeFile(i)}
-                                progress={
-                                    sendingMedia ? (sendProgress ?? 0) : null
-                                }
+                                progress={null}
                             />
                         ))}
                     </div>

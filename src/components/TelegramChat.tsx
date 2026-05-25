@@ -118,6 +118,272 @@ const SENDER_COLORS = [
     "#ee7aae", "#6ec9cb", "#faa774", "#6a8cda",
 ];
 
+const EMOJI_CATEGORIES = [
+    {
+        label: "Smileys",
+        icon: "😀",
+        emojis: [
+            "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣",
+            "🥲", "☺️", "😊", "😇", "🙂", "🙃", "😉", "😌",
+            "😍", "🥰", "😘", "😗", "😙", "😚", "😋", "😛",
+            "😝", "😜", "🤪", "🤨", "🧐", "🤓", "😎", "🥸",
+            "🤩", "🥳", "😏", "😒", "😞", "😔", "😟", "😕",
+            "🙁", "☹️", "😣", "😖", "😫", "😩", "🥺", "😢",
+            "😭", "😤", "😠", "😡", "🤬", "🤯", "😳", "🥵",
+            "🥶", "😱", "😨", "😰", "😥", "😓", "🤗", "🤔",
+            "🫣", "🤭", "🫢", "🫡", "🤫", "🫠", "🤥", "😶",
+            "🫥", "😐", "🫤", "😑", "😬", "🙄", "😯", "😦",
+            "😧", "😮", "😲", "🥱", "😴", "🤤", "😪", "😮‍💨",
+            "😵", "😵‍💫", "🤐", "🥴", "🤢", "🤮", "🤧", "😷",
+            "🤒", "🤕", "🤑", "🤠", "😈", "👿", "👻", "💀",
+            "☠️", "👽", "🤖", "💩", "😺", "😸", "😹", "😻",
+            "😼", "😽", "🙀", "😿", "😾",
+        ],
+    },
+    {
+        label: "Gestures",
+        icon: "👍",
+        emojis: [
+            "👋", "🤚", "🖐️", "✋", "🖖", "🫱", "🫲", "🫳",
+            "🫴", "👌", "🤌", "🤏", "✌️", "🤞", "🫰", "🤟",
+            "🤘", "🤙", "👈", "👉", "👆", "🖕", "👇", "☝️",
+            "👍", "👎", "✊", "👊", "🤛", "🤜", "👏", "🙌",
+            "🫶", "👐", "🤲", "🤝", "🙏", "✍️", "💅", "🤳",
+            "💪", "🦾", "🦿", "🦵", "🦶", "👂", "🦻", "👃",
+            "🧠", "🫀", "🫁", "🦷", "🦴", "👀", "👁️", "👅",
+            "👄", "🫦", "💋",
+        ],
+    },
+    {
+        label: "People",
+        icon: "🧑",
+        emojis: [
+            "👶", "🧒", "👦", "👧", "🧑", "👱", "👨", "🧔",
+            "👩", "🧓", "👴", "👵", "🙍", "🙎", "🙅", "🙆",
+            "💁", "🙋", "🧏", "🙇", "🤦", "🤷", "👮", "🕵️",
+            "💂", "🥷", "👷", "🫅", "🤴", "👸", "👳", "👲",
+            "🧕", "🤵", "👰", "🤰", "🫃", "🫄", "🤱", "👩‍🍼",
+            "👨‍🍼", "🧑‍🍼", "👼", "🎅", "🤶", "🧑‍🎄", "🦸", "🦹",
+            "🧙", "🧚", "🧛", "🧜", "🧝", "🧞", "🧟", "🧌",
+            "💆", "💇", "🚶", "🧍", "🧎", "🏃", "💃", "🕺",
+            "👯", "🧖", "🧗", "🤺", "🏇", "⛷️", "🏂", "🏌️",
+            "🏄", "🚣", "🏊", "⛹️", "🏋️", "🚴", "🚵", "🤸",
+            "🤼", "🤽", "🤾", "🤹", "🧘", "🛀", "🛌", "👭",
+            "👫", "👬", "💏", "💑", "👪", "🗣️", "👤", "👥",
+        ],
+    },
+    {
+        label: "Nature",
+        icon: "🌿",
+        emojis: [
+            "🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼",
+            "🐻‍❄️", "🐨", "🐯", "🦁", "🐮", "🐷", "🐸", "🐵",
+            "🙈", "🙉", "🙊", "🐒", "🐔", "🐧", "🐦", "🐤",
+            "🐣", "🐥", "🦆", "🦅", "🦉", "🦇", "🐺", "🐗",
+            "🐴", "🦄", "🐝", "🪱", "🐛", "🦋", "🐌", "🐞",
+            "🐜", "🪰", "🪲", "🪳", "🦟", "🦗", "🕷️", "🕸️",
+            "🦂", "🐢", "🐍", "🦎", "🦖", "🦕", "🐙", "🦑",
+            "🦐", "🦞", "🦀", "🐡", "🐠", "🐟", "🐬", "🐳",
+            "🐋", "🦈", "🦭", "🐊", "🐅", "🐆", "🦓", "🦍",
+            "🦧", "🦣", "🐘", "🦛", "🦏", "🐪", "🐫", "🦒",
+            "🦘", "🦬", "🐃", "🐂", "🐄", "🐎", "🐖", "🐏",
+            "🐑", "🦙", "🐐", "🦌", "🐕", "🐩", "🦮", "🐈",
+            "🐈‍⬛", "🪶", "🐓", "🦃", "🦤", "🦚", "🦜", "🦢",
+            "🦩", "🕊️", "🐇", "🦝", "🦨", "🦡", "🦫", "🦦",
+            "🦥", "🐁", "🐀", "🐿️", "🦔", "🐾", "🐉", "🐲",
+            "🌵", "🎄", "🌲", "🌳", "🌴", "🪵", "🌱", "🌿",
+            "☘️", "🍀", "🎍", "🪴", "🎋", "🍃", "🍂", "🍁",
+            "🍄", "🐚", "🪨", "🌾", "💐", "🌷", "🌹", "🥀",
+            "🌺", "🌸", "🌼", "🌻", "🌞", "🌝", "🌛", "🌜",
+            "🌚", "🌕", "🌖", "🌗", "🌘", "🌑", "🌒", "🌓",
+            "🌔", "🌙", "🌎", "🌍", "🌏", "🪐", "💫", "⭐",
+            "🌟", "✨", "⚡", "☄️", "💥", "🔥", "🌪️", "🌈",
+            "☀️", "🌤️", "⛅", "🌥️", "☁️", "🌦️", "🌧️", "⛈️",
+            "🌩️", "🌨️", "❄️", "☃️", "⛄", "🌬️", "💨", "💧",
+            "💦", "☔", "☂️", "🌊", "🌫️",
+        ],
+    },
+    {
+        label: "Food",
+        icon: "🍕",
+        emojis: [
+            "🍏", "🍎", "🍐", "🍊", "🍋", "🍌", "🍉", "🍇",
+            "🍓", "🫐", "🍈", "🍒", "🍑", "🥭", "🍍", "🥥",
+            "🥝", "🍅", "🍆", "🥑", "🥦", "🥬", "🥒", "🌶️",
+            "🫑", "🌽", "🥕", "🫒", "🧄", "🧅", "🥔", "🍠",
+            "🥐", "🥯", "🍞", "🥖", "🥨", "🧀", "🥚", "🍳",
+            "🧈", "🥞", "🧇", "🥓", "🥩", "🍗", "🍖", "🦴",
+            "🌭", "🍔", "🍟", "🍕", "🫓", "🥪", "🥙", "🧆",
+            "🌮", "🌯", "🫔", "🥗", "🥘", "🫕", "🥫", "🍝",
+            "🍜", "🍲", "🍛", "🍣", "🍱", "🥟", "🦪", "🍤",
+            "🍙", "🍚", "🍘", "🍥", "🥠", "🥮", "🍢", "🍡",
+            "🍧", "🍨", "🍦", "🥧", "🧁", "🍰", "🎂", "🍮",
+            "🍭", "🍬", "🍫", "🍿", "🍩", "🍪", "🌰", "🥜",
+            "🍯", "🥛", "🍼", "☕", "🫖", "🍵", "🧃", "🥤",
+            "🧋", "🍶", "🍺", "🍻", "🥂", "🍷", "🥃", "🍸",
+            "🍹", "🧉", "🍾", "🧊", "🥄", "🍴", "🍽️", "🥣",
+            "🥡", "🥢", "🧂",
+        ],
+    },
+    {
+        label: "Travel",
+        icon: "🚀",
+        emojis: [
+            "🚗", "🚕", "🚙", "🚌", "🚎", "🏎️", "🚓", "🚑",
+            "🚒", "🚐", "🛻", "🚚", "🚛", "🚜", "🦯", "🦽",
+            "🦼", "🛴", "🚲", "🛵", "🏍️", "🛺", "🚨", "🚔",
+            "🚍", "🚘", "🚖", "🚡", "🚠", "🚟", "🚃", "🚋",
+            "🚞", "🚝", "🚄", "🚅", "🚈", "🚂", "🚆", "🚇",
+            "🚊", "🚉", "✈️", "🛫", "🛬", "🛩️", "💺", "🛰️",
+            "🚀", "🛸", "🚁", "🛶", "⛵", "🚤", "🛥️", "🛳️",
+            "⛴️", "🚢", "⚓", "🪝", "⛽", "🚧", "🚦", "🚥",
+            "🚏", "🗺️", "🗿", "🗽", "🗼", "🏰", "🏯", "🏟️",
+            "🎡", "🎢", "🎠", "⛲", "⛱️", "🏖️", "🏝️", "🏜️",
+            "🌋", "⛰️", "🏔️", "🗻", "🏕️", "⛺", "🛖", "🏠",
+            "🏡", "🏘️", "🏚️", "🏗️", "🏭", "🏢", "🏬", "🏣",
+            "🏤", "🏥", "🏦", "🏨", "🏪", "🏫", "🏩", "💒",
+            "🏛️", "⛪", "🕌", "🛕", "🕍", "⛩️", "🕋", "⛲",
+            "⛺", "🌁", "🌃", "🏙️", "🌄", "🌅", "🌆", "🌇",
+            "🌉", "♨️", "🎑", "🛤️", "🛣️",
+        ],
+    },
+    {
+        label: "Activities",
+        icon: "⚽",
+        emojis: [
+            "⚽", "🏀", "🏈", "⚾", "🥎", "🎾", "🏐", "🏉",
+            "🥏", "🎱", "🪀", "🏓", "🏸", "🏒", "🏑", "🥍",
+            "🏏", "🪃", "🥅", "⛳", "🪁", "🏹", "🎣", "🤿",
+            "🥊", "🥋", "🎽", "🛹", "🛼", "🛷", "⛸️", "🥌",
+            "🎿", "⛷️", "🏂", "🪂", "🏋️", "🤼", "🤸", "⛹️",
+            "🤺", "🤾", "🏌️", "🏇", "🧘", "🏄", "🏊", "🤽",
+            "🚣", "🧗", "🚵", "🚴", "🏆", "🥇", "🥈", "🥉",
+            "🏅", "🎖️", "🏵️", "🎗️", "🎫", "🎟️", "🎪", "🤹",
+            "🎭", "🩰", "🎨", "🎬", "🎤", "🎧", "🎼", "🎹",
+            "🥁", "🪘", "🎷", "🎺", "🪗", "🎸", "🪕", "🎻",
+            "🎲", "♟️", "🎯", "🎳", "🎮", "🎰", "🧩",
+        ],
+    },
+    {
+        label: "Objects",
+        icon: "💡",
+        emojis: [
+            "⌚", "📱", "📲", "💻", "⌨️", "🖥️", "🖨️", "🖱️",
+            "🖲️", "🕹️", "🗜️", "💽", "💾", "💿", "📀", "📼",
+            "📷", "📸", "📹", "🎥", "📽️", "🎞️", "📞", "☎️",
+            "📟", "📠", "📺", "📻", "🎙️", "🎚️", "🎛️", "🧭",
+            "⏱️", "⏲️", "⏰", "🕰️", "⌛", "⏳", "📡", "🔋",
+            "🪫", "🔌", "💡", "🔦", "🕯️", "🪔", "🧯", "🛢️",
+            "💸", "💵", "💴", "💶", "💷", "🪙", "💰", "💳",
+            "💎", "⚖️", "🪜", "🧰", "🪛", "🔧", "🔨", "⚒️",
+            "🛠️", "⛏️", "🪚", "🔩", "⚙️", "🪤", "🧱", "⛓️",
+            "🧲", "🔫", "💣", "🧨", "🪓", "🔪", "🗡️", "⚔️",
+            "🛡️", "🚬", "⚰️", "🪦", "⚱️", "🏺", "🔮", "📿",
+            "🧿", "💈", "⚗️", "🔭", "🔬", "🕳️", "🩹", "🩺",
+            "💊", "💉", "🩸", "🧬", "🦠", "🧫", "🧪", "🌡️",
+            "🧹", "🪠", "🧺", "🧻", "🚽", "🚰", "🚿", "🛁",
+            "🛀", "🧼", "🪥", "🪒", "🧽", "🪣", "🧴", "🛎️",
+            "🔑", "🗝️", "🚪", "🪑", "🛋️", "🛏️", "🛌", "🧸",
+            "🪆", "🖼️", "🪞", "🪟", "🛍️", "🛒", "🎁", "🎈",
+            "🎏", "🎀", "🪄", "🪅", "🎊", "🎉", "🎎", "🏮",
+            "🎐", "🧧", "✉️", "📩", "📨", "📧", "💌", "📥",
+            "📤", "📦", "🏷️", "🪧", "📪", "📫", "📬", "📭",
+            "📮", "📯", "📜", "📃", "📄", "📑", "🧾", "📊",
+            "📈", "📉", "🗒️", "🗓️", "📆", "📅", "🗑️", "📇",
+            "🗃️", "🗳️", "🗄️", "📋", "📁", "📂", "🗂️", "🗞️",
+            "📰", "📓", "📔", "📒", "📕", "📗", "📘", "📙",
+            "📚", "📖", "🔖", "🧷", "🔗", "📎", "🖇️", "📐",
+            "📏", "🧮", "📌", "📍", "✂️", "🖊️", "🖋️", "✒️",
+            "🖌️", "🖍️", "📝", "✏️", "🔍", "🔎", "🔏", "🔐",
+            "🔒", "🔓",
+        ],
+    },
+    {
+        label: "Symbols",
+        icon: "❤️",
+        emojis: [
+            "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍",
+            "🤎", "💔", "❤️‍🔥", "❤️‍🩹", "❣️", "💕", "💞", "💓",
+            "💗", "💖", "💘", "💝", "💟", "☮️", "✝️", "☪️",
+            "🕉️", "☸️", "✡️", "🔯", "🕎", "☯️", "☦️", "🛐",
+            "⛎", "♈", "♉", "♊", "♋", "♌", "♍", "♎",
+            "♏", "♐", "♑", "♒", "♓", "🆔", "⚛️", "🉑",
+            "☢️", "☣️", "📴", "📳", "🈶", "🈚", "🈸", "🈺",
+            "🈷️", "✴️", "🆚", "💮", "🉐", "㊙️", "㊗️", "🈴",
+            "🈵", "🈹", "🈲", "🅰️", "🅱️", "🆎", "🆑", "🅾️",
+            "🆘", "❌", "⭕", "🛑", "⛔", "📛", "🚫", "💯",
+            "💢", "♨️", "🚷", "🚯", "🚳", "🚱", "🔞", "📵",
+            "🚭", "❗", "❕", "❓", "❔", "‼️", "⁉️", "🔅",
+            "🔆", "〽️", "⚠️", "🚸", "🔱", "⚜️", "🔰", "♻️",
+            "✅", "🈯", "💹", "❇️", "✳️", "❎", "🌐", "💠",
+            "Ⓜ️", "🌀", "💤", "🏧", "🚾", "♿", "🅿️", "🛗",
+            "🈳", "🈂️", "🛂", "🛃", "🛄", "🛅", "🚹", "🚺",
+            "🚼", "⚧️", "🚻", "🚮", "🎦", "📶", "🈁", "🔣",
+            "ℹ️", "🔤", "🔡", "🔠", "🆖", "🆗", "🆙", "🆒",
+            "🆕", "🆓", "0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣",
+            "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟", "🔢", "#️⃣", "*️⃣",
+            "⏏️", "▶️", "⏸️", "⏯️", "⏹️", "⏺️", "⏭️", "⏮️",
+            "⏩", "⏪", "⏫", "⏬", "◀️", "🔼", "🔽", "➡️",
+            "⬅️", "⬆️", "⬇️", "↗️", "↘️", "↙️", "↖️", "↕️",
+            "↔️", "↪️", "↩️", "⤴️", "⤵️", "🔀", "🔁", "🔂",
+            "🔄", "🔃", "🎵", "🎶", "➕", "➖", "➗", "✖️",
+            "🟰", "♾️", "💲", "💱", "™️", "©️", "®️", "〰️",
+            "➰", "➿", "🔚", "🔙", "🔛", "🔝", "🔜", "✔️",
+            "☑️", "🔘", "🔴", "🟠", "🟡", "🟢", "🔵", "🟣",
+            "⚫", "⚪", "🟤", "🔺", "🔻", "🔸", "🔹", "🔶",
+            "🔷", "🔳", "🔲", "▪️", "▫️", "◾", "◽", "◼️",
+            "◻️", "🟥", "🟧", "🟨", "🟩", "🟦", "🟪", "⬛",
+            "⬜", "🟫",
+        ],
+    },
+    {
+        label: "Flags",
+        icon: "🏳️",
+        emojis: [
+            "🏁", "🚩", "🎌", "🏴", "🏳️", "🏳️‍🌈", "🏳️‍⚧️", "🏴‍☠️",
+            "🇦🇨", "🇦🇩", "🇦🇪", "🇦🇫", "🇦🇬", "🇦🇮", "🇦🇱", "🇦🇲",
+            "🇦🇴", "🇦🇶", "🇦🇷", "🇦🇸", "🇦🇹", "🇦🇺", "🇦🇼", "🇦🇽",
+            "🇦🇿", "🇧🇦", "🇧🇧", "🇧🇩", "🇧🇪", "🇧🇫", "🇧🇬", "🇧🇭",
+            "🇧🇮", "🇧🇯", "🇧🇱", "🇧🇲", "🇧🇳", "🇧🇴", "🇧🇶", "🇧🇷",
+            "🇧🇸", "🇧🇹", "🇧🇻", "🇧🇼", "🇧🇾", "🇧🇿", "🇨🇦", "🇨🇨",
+            "🇨🇩", "🇨🇫", "🇨🇬", "🇨🇭", "🇨🇮", "🇨🇰", "🇨🇱", "🇨🇲",
+            "🇨🇳", "🇨🇴", "🇨🇵", "🇨🇷", "🇨🇺", "🇨🇻", "🇨🇼", "🇨🇽",
+            "🇨🇾", "🇨🇿", "🇩🇪", "🇩🇬", "🇩🇯", "🇩🇰", "🇩🇲", "🇩🇴",
+            "🇩🇿", "🇪🇦", "🇪🇨", "🇪🇪", "🇪🇬", "🇪🇭", "🇪🇷", "🇪🇸",
+            "🇪🇹", "🇪🇺", "🇫🇮", "🇫🇯", "🇫🇰", "🇫🇲", "🇫🇴", "🇫🇷",
+            "🇬🇦", "🇬🇧", "🇬🇩", "🇬🇪", "🇬🇫", "🇬🇬", "🇬🇭", "🇬🇮",
+            "🇬🇱", "🇬🇲", "🇬🇳", "🇬🇵", "🇬🇶", "🇬🇷", "🇬🇸", "🇬🇹",
+            "🇬🇺", "🇬🇼", "🇬🇾", "🇭🇰", "🇭🇲", "🇭🇳", "🇭🇷", "🇭🇹",
+            "🇭🇺", "🇮🇨", "🇮🇩", "🇮🇪", "🇮🇱", "🇮🇲", "🇮🇳", "🇮🇴",
+            "🇮🇶", "🇮🇷", "🇮🇸", "🇮🇹", "🇯🇪", "🇯🇲", "🇯🇴", "🇯🇵",
+            "🇰🇪", "🇰🇬", "🇰🇭", "🇰🇮", "🇰🇲", "🇰🇳", "🇰🇵", "🇰🇷",
+            "🇰🇼", "🇰🇾", "🇰🇿", "🇱🇦", "🇱🇧", "🇱🇨", "🇱🇮", "🇱🇰",
+            "🇱🇷", "🇱🇸", "🇱🇹", "🇱🇺", "🇱🇻", "🇱🇾", "🇲🇦", "🇲🇨",
+            "🇲🇩", "🇲🇪", "🇲🇫", "🇲🇬", "🇲🇭", "🇲🇰", "🇲🇱", "🇲🇲",
+            "🇲🇳", "🇲🇴", "🇲🇵", "🇲🇶", "🇲🇷", "🇲🇸", "🇲🇹", "🇲🇺",
+            "🇲🇻", "🇲🇼", "🇲🇽", "🇲🇾", "🇲🇿", "🇳🇦", "🇳🇨", "🇳🇪",
+            "🇳🇫", "🇳🇬", "🇳🇮", "🇳🇱", "🇳🇴", "🇳🇵", "🇳🇷", "🇳🇺",
+            "🇳🇿", "🇴🇲", "🇵🇦", "🇵🇪", "🇵🇫", "🇵🇬", "🇵🇭", "🇵🇰",
+            "🇵🇱", "🇵🇲", "🇵🇳", "🇵🇷", "🇵🇸", "🇵🇹", "🇵🇼", "🇵🇾",
+            "🇶🇦", "🇷🇪", "🇷🇴", "🇷🇸", "🇷🇺", "🇷🇼", "🇸🇦", "🇸🇧",
+            "🇸🇨", "🇸🇩", "🇸🇪", "🇸🇬", "🇸🇭", "🇸🇮", "🇸🇯", "🇸🇰",
+            "🇸🇱", "🇸🇲", "🇸🇳", "🇸🇴", "🇸🇷", "🇸🇸", "🇸🇹", "🇸🇻",
+            "🇸🇽", "🇸🇾", "🇸🇿", "🇹🇦", "🇹🇨", "🇹🇩", "🇹🇫", "🇹🇬",
+            "🇹🇭", "🇹🇯", "🇹🇰", "🇹🇱", "🇹🇲", "🇹🇳", "🇹🇴", "🇹🇷",
+            "🇹🇹", "🇹🇻", "🇹🇼", "🇹🇿", "🇺🇦", "🇺🇬", "🇺🇲", "🇺🇳",
+            "🇺🇸", "🇺🇾", "🇺🇿", "🇻🇦", "🇻🇨", "🇻🇪", "🇻🇬", "🇻🇮",
+            "🇻🇳", "🇻🇺", "🇼🇫", "🇼🇸", "🇽🇰", "🇾🇪", "🇾🇹", "🇿🇦",
+            "🇿🇲", "🇿🇼",
+        ],
+    },
+];
+
+const RECENT_EMOJI_STORAGE_KEY = "telegram-chat-recent-emojis";
+const MAX_RECENT_EMOJIS = 48;
+const ALL_EMOJI_OPTIONS = Array.from(
+    new Set(EMOJI_CATEGORIES.flatMap((category) => category.emojis)),
+).sort((a, b) => b.length - a.length);
+
 function senderColor(id?: string): string {
     if (!id) return SENDER_COLORS[0];
     let h = 0;
@@ -1611,6 +1877,26 @@ export default function TelegramChat({
     const { startForward } = useForwardJobs();
     const [input, setInput] = useState("");
     const [isTyping, setIsTyping] = useState(false);
+    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const [emojiCategory, setEmojiCategory] = useState(0);
+    const [recentEmojis, setRecentEmojis] = useState<string[]>(() => {
+        if (typeof window === "undefined") return [];
+        try {
+            const parsed = JSON.parse(
+                window.localStorage.getItem(RECENT_EMOJI_STORAGE_KEY) ?? "[]",
+            );
+            if (!Array.isArray(parsed)) return [];
+            return parsed
+                .filter(
+                    (emoji): emoji is string =>
+                        typeof emoji === "string" &&
+                        ALL_EMOJI_OPTIONS.includes(emoji),
+                )
+                .slice(0, MAX_RECENT_EMOJIS);
+        } catch {
+            return [];
+        }
+    });
     // Media files queued in the composer, awaiting send.
     const [pendingFiles, setPendingFiles] = useState<File[]>([]);
     const [sendingMedia, setSendingMedia] = useState(false);
@@ -1721,7 +2007,15 @@ export default function TelegramChat({
     const bottomRef = useRef<HTMLDivElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
+    const emojiPickerRef = useRef<HTMLDivElement>(null);
+    const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
+    const swipeBackTriggeredRef = useRef(false);
     const grouped = groupMessagesByDate(messages);
+
+    function resizeInput(el: HTMLTextAreaElement) {
+        el.style.height = "auto";
+        el.style.height = Math.min(el.scrollHeight, 120) + "px";
+    }
 
     // Scroll behaviour:
     //  - atBottomRef: is the user parked near the bottom of the history?
@@ -1754,6 +2048,38 @@ export default function TelegramChat({
             prependAnchorRef.current = el.scrollHeight;
             onLoadOlder();
         }
+    }
+
+    function handleSwipeStart(e: React.TouchEvent<HTMLDivElement>) {
+        if (!onBack || e.touches.length !== 1) return;
+        const touch = e.touches[0];
+        swipeStartRef.current = { x: touch.clientX, y: touch.clientY };
+        swipeBackTriggeredRef.current = false;
+    }
+
+    function handleSwipeMove(e: React.TouchEvent<HTMLDivElement>) {
+        if (!onBack || !swipeStartRef.current || swipeBackTriggeredRef.current) {
+            return;
+        }
+        const touch = e.touches[0];
+        if (!touch) return;
+        const dx = touch.clientX - swipeStartRef.current.x;
+        const dy = touch.clientY - swipeStartRef.current.y;
+
+        if (Math.abs(dy) > 60 && Math.abs(dy) > Math.abs(dx)) {
+            swipeStartRef.current = null;
+            return;
+        }
+        if (dx > 90 && Math.abs(dy) < 55) {
+            swipeBackTriggeredRef.current = true;
+            swipeStartRef.current = null;
+            onBack();
+        }
+    }
+
+    function handleSwipeEnd() {
+        swipeStartRef.current = null;
+        swipeBackTriggeredRef.current = false;
     }
 
     // Before paint: if older messages were just prepended, shift scrollTop by
@@ -1800,9 +2126,81 @@ export default function TelegramChat({
     // auto-resize textarea
     function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
         setInput(e.target.value);
-        e.target.style.height = "auto";
-        e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
+        resizeInput(e.target);
     }
+
+    function insertEmoji(emoji: string) {
+        const el = inputRef.current;
+        const start = el?.selectionStart ?? input.length;
+        const end = el?.selectionEnd ?? input.length;
+        const next = input.slice(0, start) + emoji + input.slice(end);
+        const nextCursor = start + emoji.length;
+
+        setInput(next);
+        requestAnimationFrame(() => {
+            if (!inputRef.current) return;
+            inputRef.current.focus();
+            inputRef.current.setSelectionRange(nextCursor, nextCursor);
+            resizeInput(inputRef.current);
+        });
+    }
+
+    function emojisInText(text: string) {
+        const found: string[] = [];
+        for (let i = 0; i < text.length;) {
+            const match = ALL_EMOJI_OPTIONS.find((emoji) =>
+                text.startsWith(emoji, i),
+            );
+            if (match) {
+                found.push(match);
+                i += match.length;
+            } else {
+                i += 1;
+            }
+        }
+        return found;
+    }
+
+    function rememberEmojisFromText(text: string) {
+        const used = emojisInText(text);
+        if (used.length === 0) return;
+        setRecentEmojis((prev) => {
+            const next = [
+                ...used.slice().reverse(),
+                ...prev.filter((emoji) => !used.includes(emoji)),
+            ].slice(0, MAX_RECENT_EMOJIS);
+            try {
+                window.localStorage.setItem(
+                    RECENT_EMOJI_STORAGE_KEY,
+                    JSON.stringify(next),
+                );
+            } catch {
+                // Recent emojis are a convenience; sending should never depend on storage.
+            }
+            return next;
+        });
+        setEmojiCategory(0);
+    }
+
+    useEffect(() => {
+        if (!showEmojiPicker) return;
+        function onPointerDown(e: MouseEvent | TouchEvent) {
+            const target = e.target;
+            if (
+                target instanceof Node &&
+                emojiPickerRef.current?.contains(target)
+            ) {
+                return;
+            }
+            setShowEmojiPicker(false);
+        }
+        document.addEventListener("mousedown", onPointerDown);
+        document.addEventListener("touchstart", onPointerDown);
+        return () => {
+            document.removeEventListener("mousedown", onPointerDown);
+            document.removeEventListener("touchstart", onPointerDown);
+        };
+    }, [showEmojiPicker]);
 
     async function handleSend() {
         // Queued media takes priority — the text box becomes its caption.
@@ -1855,7 +2253,9 @@ export default function TelegramChat({
             setSendingMedia(true);
             forceScrollRef.current = true;
             try {
-                await uploadMedia(items, input.trim());
+                const caption = input.trim();
+                await uploadMedia(items, caption);
+                rememberEmojisFromText(caption);
                 setPendingFiles([]);
                 setInput("");
                 if (inputRef.current) inputRef.current.style.height = "auto";
@@ -1878,6 +2278,7 @@ export default function TelegramChat({
         // Reveal the user's own message even if they were reading history.
         forceScrollRef.current = true;
         onSendMessage(text);
+        rememberEmojisFromText(text);
         setInput("");
         if (inputRef.current) {
             inputRef.current.style.height = "auto";
@@ -2024,13 +2425,32 @@ export default function TelegramChat({
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             handleSend();
+        } else if (e.key === "Escape") {
+            setShowEmojiPicker(false);
         }
     }
 
     const name = `${contact.firstName} ${contact.lastName || ""}`.trim();
+    const emojiCategories =
+        recentEmojis.length > 0
+            ? [
+                  {
+                      label: "Recent",
+                      icon: "🕘",
+                      emojis: recentEmojis,
+                  },
+                  ...EMOJI_CATEGORIES,
+              ]
+            : EMOJI_CATEGORIES;
+    const activeEmojiCategory =
+        emojiCategories[emojiCategory] ?? emojiCategories[0];
 
     return (
         <div
+            onTouchStart={handleSwipeStart}
+            onTouchMove={handleSwipeMove}
+            onTouchEnd={handleSwipeEnd}
+            onTouchCancel={handleSwipeEnd}
             className="flex flex-col h-full w-full"
             style={{
                 // background: "#f0f2f5",
@@ -2378,14 +2798,57 @@ export default function TelegramChat({
                 )}
                 <div className="flex items-end gap-2">
                 {/* emoji button */}
-                <button className="text-[#8a9aaa] dark:text-zinc-400 hover:text-[#3390ec] transition-colors p-2 rounded-full hover:bg-[#3390ec]/10 shrink-0 mb-0.5">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" />
-                        <path d="M8.5 14.5s1 1.5 3.5 1.5 3.5-1.5 3.5-1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                        <circle cx="9" cy="10" r="1" fill="currentColor" />
-                        <circle cx="15" cy="10" r="1" fill="currentColor" />
-                    </svg>
-                </button>
+                <div ref={emojiPickerRef} className="relative shrink-0">
+                    {showEmojiPicker && (
+                        <div className="absolute bottom-12 left-0 z-40 w-[320px] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+                            <div className="flex gap-1 overflow-x-auto border-b border-gray-100 px-2 py-1.5 dark:border-zinc-800">
+                                {emojiCategories.map((category, index) => (
+                                    <button
+                                        key={category.label}
+                                        type="button"
+                                        onClick={() => setEmojiCategory(index)}
+                                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-lg transition-colors ${
+                                            emojiCategory === index
+                                                ? "bg-[#3390ec]/15"
+                                                : "hover:bg-[#3390ec]/10"
+                                        }`}
+                                        aria-label={category.label}
+                                        aria-pressed={emojiCategory === index}
+                                    >
+                                        {category.icon}
+                                    </button>
+                                ))}
+                            </div>
+                            <div className="grid max-h-72 grid-cols-8 gap-1 overflow-y-auto p-2">
+                                {activeEmojiCategory.emojis.map((emoji, index) => (
+                                    <button
+                                        key={`${emoji}-${index}`}
+                                        type="button"
+                                        onClick={() => insertEmoji(emoji)}
+                                        className="flex h-8 w-8 items-center justify-center rounded-lg text-lg transition-colors hover:bg-[#3390ec]/10"
+                                        aria-label={`Insert ${emoji}`}
+                                    >
+                                        {emoji}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    <button
+                        type="button"
+                        onClick={() => setShowEmojiPicker((open) => !open)}
+                        className="text-[#8a9aaa] dark:text-zinc-400 hover:text-[#3390ec] transition-colors p-2 rounded-full hover:bg-[#3390ec]/10 shrink-0 mb-0.5"
+                        aria-label="Choose emoji"
+                        aria-expanded={showEmojiPicker}
+                    >
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" />
+                            <path d="M8.5 14.5s1 1.5 3.5 1.5 3.5-1.5 3.5-1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                            <circle cx="9" cy="10" r="1" fill="currentColor" />
+                            <circle cx="15" cy="10" r="1" fill="currentColor" />
+                        </svg>
+                    </button>
+                </div>
 
                 {/* textarea */}
                 <div className="flex-1 bg-[#f0f2f5] dark:bg-zinc-800 rounded-2xl px-3 py-2 flex items-end gap-2">
@@ -2421,7 +2884,7 @@ export default function TelegramChat({
                     onClick={handleSend}
                     disabled={sendingMedia}
                     className={`
-                        w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all duration-200 mb-0.5
+                        w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all duration-200
                         ${input.trim() || pendingFiles.length > 0
                             ? "bg-[#3390ec] text-white shadow-lg shadow-[#3390ec]/30 scale-100 hover:scale-105"
                             : "bg-[#f0f2f5] dark:bg-zinc-800 text-[#8a9aaa] dark:text-zinc-400"
@@ -2429,7 +2892,7 @@ export default function TelegramChat({
                     `}
                     aria-label="Send"
                 >
-                    {sendingMedia ? (
+                    {/* {sendingMedia ? (
                         <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
                     ) : input.trim() || pendingFiles.length > 0 ? (
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -2443,7 +2906,13 @@ export default function TelegramChat({
                             <line x1="12" y1="19" x2="12" y2="23" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                             <line x1="8" y1="23" x2="16" y2="23" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                         </svg>
-                    )}
+                    )} */}
+                    <div className="mt-0.5">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                            <path d="M22 2L11 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M22 2L15 22l-4-9-9-4 20-7z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                    </div>
                 </button>
                 </div>
             </div>

@@ -449,7 +449,7 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                 </div>
 
                 {/* Chat */}
-                <div className="h-screen flex justify-center">
+                <div className="h-[calc(100%-61px)] flex justify-center">
                     <div className="w-full h-full flex flex-col">
                         <div className="flex-1 overflow-hidden">
                             <TelegramChat

@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/telegram";
+import { createClient, getConnectedClient } from "@/lib/telegram";
 import { buildMediaInfo } from "@/lib/telegram-media";
 import { resolveUserPeer } from "@/lib/telegram-peer";
 import { Api } from "telegram";
@@ -40,30 +40,22 @@ function parseRange(
   return { start, end };
 }
 
-/** Pick the largest real (non-stripped) thumbnail size from a message. */
-function pickThumbSize(
-  media: Api.TypeMessageMedia,
-): Api.TypePhotoSize | undefined {
-  let sizes: readonly Api.TypePhotoSize[] = [];
-  if (
-    media instanceof Api.MessageMediaDocument &&
-    media.document instanceof Api.Document
-  ) {
-    sizes = media.document.thumbs ?? [];
-  } else if (
-    media instanceof Api.MessageMediaPhoto &&
-    media.photo instanceof Api.Photo
-  ) {
-    sizes = media.photo.sizes;
-  }
-  let best: Api.TypePhotoSize | undefined;
+/**
+ * Pick the largest plain PhotoSize (letter code like 's','m','x','y') from a
+ * message's photo sizes. We intentionally skip PhotoStrippedSize (the tiny blur
+ * placeholder), PhotoSizeProgressive (can't be passed as a thumb download hint),
+ * and PhotoCachedSize (used differently). Returns undefined when no real size
+ * exists.
+ */
+function pickBestPhotoSize(
+  sizes: readonly Api.TypePhotoSize[],
+): Api.PhotoSize | undefined {
+  let best: Api.PhotoSize | undefined;
   let bestArea = 0;
   for (const s of sizes) {
-    let area = 0;
-    if (s instanceof Api.PhotoSize) area = s.w * s.h;
-    else if (s instanceof Api.PhotoSizeProgressive) area = s.w * s.h;
-    else continue; // skip stripped / cached / path — those are the blurry ones
-    if (area >= bestArea) {
+    if (!(s instanceof Api.PhotoSize)) continue; // only plain named sizes
+    const area = s.w * s.h;
+    if (area > bestArea) {
       bestArea = area;
       best = s;
     }
@@ -72,8 +64,12 @@ function pickThumbSize(
 }
 
 /**
- * Serve a sharp, real thumbnail (the JPEG preview Telegram generates) rather
- * than the tiny stripped blur. Used for video posters in the chat.
+ * Serve a sharp image for a link preview (WebPage photo) or a video poster.
+ *
+ * Uses getConnectedClient so the same GramJS session/connection is reused
+ * across concurrent requests. This prevents auth.ExportAuthorization from
+ * being called on every request, which was causing FloodWait (1000+ seconds)
+ * when many thumbnails loaded simultaneously.
  */
 async function streamThumbnail(
   sessionString: string,
@@ -82,41 +78,86 @@ async function streamThumbnail(
   chatId: string | null,
   messageId: number,
 ): Promise<Response> {
-  const client = createClient(sessionString);
-  await client.connect();
-  try {
-    const peer = chatId
-      ? String(chatId)
-      : await resolveUserPeer(client, userId ?? "", accessHash);
-    const messages = await client.getMessages(peer, { ids: [messageId] });
-    const msg = messages[0];
-    if (!msg || !msg.media) {
-      return Response.json({ error: "Not found" }, { status: 404 });
-    }
-    const size = pickThumbSize(msg.media);
+  // Shared client — do NOT disconnect it; it belongs to the cache.
+  const client = await getConnectedClient(sessionString);
+
+  const peer = chatId
+    ? String(chatId)
+    : await resolveUserPeer(client, userId ?? "", accessHash);
+  const messages = await client.getMessages(peer, { ids: [messageId] });
+  const msg = messages[0];
+  if (!msg || !msg.media) {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // ── WebPage link-preview photo ──────────────────────────────────────────────
+  if (
+    msg.media instanceof Api.MessageMediaWebPage &&
+    msg.media.webpage instanceof Api.WebPage &&
+    msg.media.webpage.photo instanceof Api.Photo
+  ) {
+    const photo = msg.media.webpage.photo;
+    const size = pickBestPhotoSize(photo.sizes);
     if (!size) {
-      return Response.json({ error: "No thumbnail" }, { status: 404 });
+      return Response.json({ error: "No photo size" }, { status: 404 });
     }
-    const buf = await client.downloadMedia(msg.media, { thumb: size });
-    if (!buf) {
-      return Response.json({ error: "No thumbnail" }, { status: 404 });
+
+    const location = new Api.InputPhotoFileLocation({
+      id: photo.id,
+      accessHash: photo.accessHash,
+      fileReference: photo.fileReference,
+      thumbSize: size.type,
+    });
+    const fileSize = size.size > 0 ? bigInt(size.size) : bigInt(2 * 1024 * 1024);
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of client.iterDownload({
+      file: location,
+      dcId: photo.dcId,
+      requestSize: REQUEST_SIZE,
+      fileSize,
+    })) {
+      chunks.push(Buffer.from(chunk instanceof Buffer ? chunk : new Uint8Array(chunk)));
     }
-    const data = buf instanceof Buffer ? buf : Buffer.from(buf as Uint8Array);
-    return new Response(data as unknown as BodyInit, {
+    if (chunks.length === 0) {
+      return Response.json({ error: "Empty download" }, { status: 404 });
+    }
+    return new Response(Buffer.concat(chunks) as unknown as BodyInit, {
       headers: {
         "Content-Type": "image/jpeg",
         "Cache-Control": "private, max-age=86400",
         "X-Content-Type-Options": "nosniff",
       },
     });
-  } finally {
-    try {
-      await client.disconnect();
-    } catch {
-      // ignore
-    }
   }
+
+  // ── Video / document poster thumbnail ────────────────────────────────────────
+  const sizes: readonly Api.TypePhotoSize[] =
+    msg.media instanceof Api.MessageMediaDocument &&
+    msg.media.document instanceof Api.Document
+      ? msg.media.document.thumbs ?? []
+      : msg.media instanceof Api.MessageMediaPhoto &&
+          msg.media.photo instanceof Api.Photo
+        ? msg.media.photo.sizes
+        : [];
+  const size = pickBestPhotoSize(sizes);
+  if (!size) {
+    return Response.json({ error: "No thumbnail" }, { status: 404 });
+  }
+  const buf = await client.downloadMedia(msg.media, { thumb: size });
+  if (!buf) {
+    return Response.json({ error: "No thumbnail" }, { status: 404 });
+  }
+  const data = buf instanceof Buffer ? buf : Buffer.from(buf as Uint8Array);
+  return new Response(data as unknown as BodyInit, {
+    headers: {
+      "Content-Type": "image/jpeg",
+      "Cache-Control": "private, max-age=86400",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
 }
+
 
 async function streamChatMedia(
   sessionString: string,

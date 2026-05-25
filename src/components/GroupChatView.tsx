@@ -5,6 +5,7 @@ import TelegramChat from "./TelegramChat";
 import type {
   ChatMedia,
   ForwardInfo,
+  LinkPreview,
 } from "@/app/api/telegram/conversation/route";
 
 /** A resolved Telegram link the viewer should open. */
@@ -38,6 +39,7 @@ type ApiMessage = {
   senderId?: string;
   senderName?: string;
   forwardedFrom?: ForwardInfo;
+  linkPreview?: LinkPreview;
 };
 
 type UiMessage = {
@@ -51,6 +53,7 @@ type UiMessage = {
   senderId?: string;
   senderName?: string;
   forwardedFrom?: ForwardInfo;
+  linkPreview?: LinkPreview;
 };
 
 function toUi(m: ApiMessage): UiMessage {
@@ -65,6 +68,7 @@ function toUi(m: ApiMessage): UiMessage {
     senderId: m.senderId,
     senderName: m.senderName,
     forwardedFrom: m.forwardedFrom,
+    linkPreview: m.linkPreview,
   };
 }
 

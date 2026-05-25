@@ -100,5 +100,41 @@ export function buildMediaInfo(
     };
   }
 
+  if (
+    media instanceof Api.MessageMediaWebPage &&
+    media.webpage instanceof Api.WebPage &&
+    media.webpage.photo instanceof Api.Photo
+  ) {
+    const photo = media.webpage.photo;
+    let largest: Api.PhotoSize | Api.PhotoSizeProgressive | undefined;
+    let largestBytes = 0;
+    for (const size of photo.sizes) {
+      if (size instanceof Api.PhotoSize && size.size > largestBytes) {
+        largest = size;
+        largestBytes = size.size;
+      } else if (size instanceof Api.PhotoSizeProgressive) {
+        const max = size.sizes[size.sizes.length - 1] ?? 0;
+        if (max > largestBytes) {
+          largest = size;
+          largestBytes = max;
+        }
+      }
+    }
+    if (!largest) return null;
+
+    return {
+      location: new Api.InputPhotoFileLocation({
+        id: photo.id,
+        accessHash: photo.accessHash,
+        fileReference: photo.fileReference,
+        thumbSize: largest.type,
+      }),
+      dcId: photo.dcId,
+      fileSize: bigInt(largestBytes),
+      mimeType: "image/jpeg",
+      fileName: `preview_${messageId}.jpg`,
+    };
+  }
+
   return null;
 }

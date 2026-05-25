@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist_Mono, Play, Siemreap } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 
 // next/font CSS variables — referenced by the `--font-*` theme keys in
@@ -36,11 +37,34 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const themeScript = `
+    (() => {
+      try {
+        const mode = localStorage.getItem("tigram-theme-mode") || "system";
+        const media = window.matchMedia("(prefers-color-scheme: dark)");
+        const isDark = mode === "dark" || (mode === "system" && media.matches);
+        document.documentElement.classList.toggle("dark", isDark);
+        document.documentElement.dataset.theme = mode;
+        document.documentElement.style.colorScheme = isDark ? "dark" : "light";
+      } catch {
+        const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.classList.toggle("dark", isDark);
+        document.documentElement.dataset.theme = "system";
+        document.documentElement.style.colorScheme = isDark ? "dark" : "light";
+      }
+    })();
+  `;
+
   return (
     <html
       lang="en"
       className={`${play.variable} ${siemreap.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <Script
+        id="theme-mode"
+        strategy="beforeInteractive"
+        dangerouslySetInnerHTML={{ __html: themeScript }}
+      />
       <body suppressHydrationWarning className="min-h-full flex flex-col">
         {children}
       </body>

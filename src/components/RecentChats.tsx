@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { LayoutGrid, List, ChevronLeft, ChevronRight, Search, X, ArrowLeft } from "lucide-react";
 import TelegramChat from "@/components/TelegramChat";
+import { useUnread } from "@/components/UnreadContext";
 import type {
     ChatMedia,
     ForwardInfo,
+    LinkPreview,
 } from "@/app/api/telegram/conversation/route";
 
 /** Chat message shape consumed by <TelegramChat>. */
@@ -18,6 +20,7 @@ type ChatUiMessage = {
     media?: ChatMedia;
     groupedId?: string;
     forwardedFrom?: ForwardInfo;
+    linkPreview?: LinkPreview;
 };
 
 /** Raw message shape returned by /api/telegram/conversation. */
@@ -30,6 +33,7 @@ type ApiMessage = {
     media?: ChatMedia;
     groupedId?: string;
     forwardedFrom?: ForwardInfo;
+    linkPreview?: LinkPreview;
 };
 
 function toUiMessage(m: ApiMessage): ChatUiMessage {
@@ -42,6 +46,7 @@ function toUiMessage(m: ApiMessage): ChatUiMessage {
         media: m.media,
         groupedId: m.groupedId,
         forwardedFrom: m.forwardedFrom,
+        linkPreview: m.linkPreview,
     };
 }
 
@@ -161,6 +166,11 @@ export default function RecentChats({ sessionString }: { sessionString: string }
     const [totalPages, setTotalPages] = useState(1);
     const [search, setSearch] = useState("");
     const [searchInput, setSearchInput] = useState("");
+    // Live unread counts piped in from Telegram's update stream. The initial
+    // contacts fetch still seeds `contact.unreadCount` so we render correctly
+    // before the stream is connected; once it's connected, the per-chat value
+    // here takes over so the badge updates in real time.
+    const { perChat: unreadByChat, markRead } = useUnread();
 
     // ── Chat state ──
     const [selectedContact, setSelectedContact] = useState<ChatContact | null>(
@@ -296,7 +306,7 @@ export default function RecentChats({ sessionString }: { sessionString: string }
 
     // Live updates: poll the open conversation every 3s. The ref keeps the
     // interval stable while always calling the latest closure.
-    const pollRef = useRef<() => void>(() => {});
+    const pollRef = useRef<() => void>(() => { });
     pollRef.current = () => {
         if (selectedContact) {
             void loadConversation(
@@ -385,11 +395,14 @@ export default function RecentChats({ sessionString }: { sessionString: string }
         void loadConversation(contact.id, contact.accessHash, true);
 
         // Mark the chat seen — clear its unread badge locally and server-side.
+        // The stream will also emit a read-receipt delta shortly; markRead just
+        // avoids the brief flash where the badge stays until then.
         setContacts((prev) =>
             prev.map((c) =>
                 c.id === contact.id ? { ...c, unreadCount: 0 } : c,
             ),
         );
+        markRead(contact.id);
         void fetch("/api/telegram/mark-read", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -556,6 +569,11 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                         {contacts.map((contact) => {
                             const name = getName(contact);
                             const gradient = getAvatarGradient(name);
+                            // Prefer the live stream value; fall back to the
+                            // initial fetch so the badge isn't blank during the
+                            // brief window before the stream's first snapshot.
+                            const liveUnread =
+                                unreadByChat[contact.id] ?? contact.unreadCount ?? 0;
                             return (
                                 <div
                                     key={contact.id}
@@ -571,9 +589,9 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                             {contact.username ? `@${contact.username}` : contact.phone}
                                         </p>
                                     </div>
-                                    {!!contact.unreadCount && (
+                                    {liveUnread > 0 && (
                                         <span className="flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-indigo-500 px-1.5 text-[11px] font-semibold text-white">
-                                            {contact.unreadCount > 99 ? "99+" : contact.unreadCount}
+                                            {liveUnread > 99 ? "99+" : liveUnread}
                                         </span>
                                     )}
                                 </div>
@@ -585,15 +603,17 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                         {contacts.map((contact) => {
                             const name = getName(contact);
                             const gradient = getAvatarGradient(name);
+                            const liveUnread =
+                                unreadByChat[contact.id] ?? contact.unreadCount ?? 0;
                             return (
                                 <div
                                     key={contact.id}
                                     onClick={() => openChat(contact)}
                                     className="relative bg-white dark:bg-zinc-900 border border-stone-200 dark:border-zinc-800 rounded-2xl p-4 text-center cursor-pointer hover:-translate-y-0.5 hover:shadow-md hover:shadow-stone-200/80 hover:border-stone-300 dark:border-zinc-700 transition-all duration-150"
                                 >
-                                    {!!contact.unreadCount && (
+                                    {liveUnread > 0 && (
                                         <span className="absolute right-2 top-2 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-indigo-500 px-1.5 text-[11px] font-semibold text-white">
-                                            {contact.unreadCount > 99 ? "99+" : contact.unreadCount}
+                                            {liveUnread > 99 ? "99+" : liveUnread}
                                         </span>
                                     )}
                                     <ContactAvatar

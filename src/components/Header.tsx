@@ -27,6 +27,10 @@ interface HeaderProps {
   onSignOut: () => void;
 }
 
+type ThemeMode = "system" | "light" | "dark";
+
+const THEME_STORAGE_KEY = "tigram-theme-mode";
+
 function getInitials(user: UserInfo) {
   return (user.firstName?.[0] ?? "") + (user.lastName?.[0] ?? "") || "U";
 }
@@ -34,6 +38,22 @@ function getInitials(user: UserInfo) {
 function getDisplayName(user: UserInfo) {
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ");
   return name || user.username || user.phone || "User";
+}
+
+function getInitialThemeMode(): ThemeMode {
+  if (typeof window === "undefined") return "system";
+  const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+  return stored === "light" || stored === "dark" || stored === "system"
+    ? stored
+    : "system";
+}
+
+function applyThemeMode(mode: ThemeMode) {
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const isDark = mode === "dark" || (mode === "system" && prefersDark);
+  document.documentElement.classList.toggle("dark", isDark);
+  document.documentElement.dataset.theme = mode;
+  document.documentElement.style.colorScheme = isDark ? "dark" : "light";
 }
 
 function InitialsAvatar({
@@ -113,17 +133,34 @@ export default function Header({
   const [open, setOpen] = useState(false);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [photoFailed, setPhotoFailed] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialThemeMode);
+  const [themeOpen, setThemeOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const themeMenuRef = useRef<HTMLDivElement>(null);
   const route = useRouter();
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node))
+      const target = e.target as Node;
+      if (menuRef.current && !menuRef.current.contains(target))
         setOpen(false);
+      if (themeMenuRef.current && !themeMenuRef.current.contains(target))
+        setThemeOpen(false);
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
+
+  useEffect(() => {
+    applyThemeMode(themeMode);
+    window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+
+    if (themeMode !== "system") return;
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const handleChange = () => applyThemeMode("system");
+    media.addEventListener("change", handleChange);
+    return () => media.removeEventListener("change", handleChange);
+  }, [themeMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -167,6 +204,29 @@ export default function Header({
     ) : (
       <InitialsAvatar initials={initials} />
     );
+  const themeLabel =
+    themeMode === "system" ? "System" : themeMode === "dark" ? "Dark" : "Light";
+  const themeOptions: { mode: ThemeMode; label: string; description: string }[] = [
+    { mode: "system", label: "System", description: "Use device mode" },
+    { mode: "light", label: "Light", description: "Always light" },
+    { mode: "dark", label: "Dark", description: "Always dark" },
+  ];
+  const renderThemeIcon = (mode: ThemeMode) =>
+    mode === "system" ? (
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+        <rect x="3" y="4" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M8 20h8M12 16v4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    ) : mode === "dark" ? (
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+        <path d="M20.2 14.3A7.5 7.5 0 0 1 9.7 3.8 8.5 8.5 0 1 0 20.2 14.3Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      </svg>
+    ) : (
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
 
   return (
     <header className="relative z-50 flex h-14 shrink-0 items-center justify-between border-b border-zinc-200/80 bg-white/90 px-4 shadow-sm backdrop-blur-xl sm:px-6 dark:border-zinc-800/80 dark:bg-zinc-950/90">
@@ -195,6 +255,72 @@ export default function Header({
 
       {/* Right: Account */}
       <div className="flex items-center gap-2">
+        <div className="relative" ref={themeMenuRef}>
+          <button
+            type="button"
+            onClick={() => {
+              setThemeOpen((value) => !value);
+              setOpen(false);
+            }}
+            title={`Theme: ${themeLabel}`}
+            className="flex h-9 items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-2.5 text-sm font-medium text-zinc-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-blue-800 dark:hover:bg-blue-950/40 dark:hover:text-blue-300"
+            aria-label={`Theme mode: ${themeLabel}`}
+            aria-expanded={themeOpen}
+          >
+            {renderThemeIcon(themeMode)}
+            <span className="hidden sm:inline">{themeLabel}</span>
+            <svg
+              className={`hidden text-zinc-400 transition-transform duration-200 sm:block ${themeOpen ? "rotate-180" : ""}`}
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+          {themeOpen && (
+            <div className="absolute right-0 top-full z-[60] mt-2 w-52 overflow-hidden rounded-2xl border border-zinc-200/80 bg-white p-1.5 shadow-2xl shadow-zinc-200/60 dark:border-zinc-700/60 dark:bg-zinc-900 dark:shadow-black/40">
+              {themeOptions.map((option) => {
+                const selected = option.mode === themeMode;
+                return (
+                  <button
+                    key={option.mode}
+                    type="button"
+                    onClick={() => {
+                      setThemeMode(option.mode);
+                      setThemeOpen(false);
+                    }}
+                    className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left transition-colors ${
+                      selected
+                        ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
+                        : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800/60"
+                    }`}
+                  >
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-800">
+                      {renderThemeIcon(option.mode)}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold">
+                        {option.label}
+                      </span>
+                      <span className="block text-xs text-zinc-400">
+                        {option.description}
+                      </span>
+                    </span>
+                    {selected && (
+                      <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
         <div>
           <button
             onClick={() => {

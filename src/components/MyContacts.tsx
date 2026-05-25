@@ -5,6 +5,7 @@ import TelegramChat from "./TelegramChat";
 import type {
     ChatMedia,
     ForwardInfo,
+    LinkPreview,
 } from "@/app/api/telegram/conversation/route";
 import type { ChatNavUser } from "./ChatNavContext";
 
@@ -64,6 +65,7 @@ type ChatUiMessage = {
     media?: ChatMedia;
     groupedId?: string;
     forwardedFrom?: ForwardInfo;
+    linkPreview?: LinkPreview;
 };
 
 /** Raw message shape returned by /api/telegram/conversation. */
@@ -76,6 +78,7 @@ type ApiMessage = {
     media?: ChatMedia;
     groupedId?: string;
     forwardedFrom?: ForwardInfo;
+    linkPreview?: LinkPreview;
 };
 
 function toUiMessage(m: ApiMessage): ChatUiMessage {
@@ -88,6 +91,7 @@ function toUiMessage(m: ApiMessage): ChatUiMessage {
         media: m.media,
         groupedId: m.groupedId,
         forwardedFrom: m.forwardedFrom,
+        linkPreview: m.linkPreview,
     };
 }
 

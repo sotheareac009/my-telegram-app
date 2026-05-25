@@ -4,7 +4,10 @@ import { useCallback, useState, useRef, useEffect, useLayoutEffect } from "react
 import { useChatNav, telegramLinkTarget } from "./ChatNavContext";
 import { useForwardJobs } from "./ForwardJobsContext";
 import DialogAvatar from "./DialogAvatar";
-import type { ForwardInfo } from "@/app/api/telegram/conversation/route";
+import type {
+    ForwardInfo,
+    LinkPreview,
+} from "@/app/api/telegram/conversation/route";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface ChatMedia {
@@ -46,6 +49,8 @@ interface Message {
     senderName?: string;
     /** Origin info when this message is a forward. */
     forwardedFrom?: ForwardInfo;
+    /** Telegram webpage/deep-link preview. */
+    linkPreview?: LinkPreview;
 }
 
 /** A chat the user can forward messages to (from /api/telegram/dialogs). */
@@ -1051,6 +1056,139 @@ function MessageText({ text }: { text: string }) {
     return <>{out}</>;
 }
 
+function LinkPreviewCard({
+    preview,
+    imageUrl,
+}: {
+    preview: LinkPreview;
+    imageUrl?: string;
+}) {
+    const [imageFailed, setImageFailed] = useState(false);
+    const [imageLoaded, setImageLoaded] = useState(false);
+    const href = preview.url.startsWith("http")
+        ? preview.url
+        : `https://${preview.url}`;
+    const imageSrc = imageUrl || preview.thumb;
+    const host =
+        preview.siteName ||
+        preview.displayUrl ||
+        (() => {
+            try {
+                return new URL(href).hostname.replace(/^www\./, "");
+            } catch {
+                return preview.url;
+            }
+        })();
+
+    return (
+        <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 block max-w-full overflow-hidden rounded-lg bg-[#ffffff1f] text-left transition-colors hover:bg-[#ffffff2e] dark:bg-black/15 dark:hover:bg-black/25"
+        >
+            <span className="block border-l-4 border-[#7ec8ff] px-2.5 py-1.5">
+                <span className="block truncate text-[13px] font-bold leading-tight text-[#3390ec] dark:text-blue-300">
+                    {host}
+                </span>
+                {preview.title && (
+                    <span className="mt-0.5 block line-clamp-2 text-[14px] font-semibold leading-snug text-[#111] dark:text-zinc-100">
+                        {preview.title}
+                    </span>
+                )}
+                {preview.description && (
+                    <span className="mt-0.5 block line-clamp-3 text-[13px] leading-snug text-zinc-600 dark:text-zinc-300">
+                        {preview.description}
+                    </span>
+                )}
+            </span>
+
+            {imageSrc && (
+                <span className="relative block aspect-[1.78] w-full overflow-hidden bg-black/10 dark:bg-white/[0.06]">
+
+                    {/* Shimmer skeleton + spinner — shown while image is loading */}
+                    {!imageLoaded && !imageFailed && (
+                        <span className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+                            {/* Animated shimmer sweep */}
+                            <span
+                                className="pointer-events-none absolute inset-0"
+                                style={{
+                                    background:
+                                        "linear-gradient(90deg,transparent 0%,rgba(255,255,255,0.11) 50%,transparent 100%)",
+                                    backgroundSize: "200% 100%",
+                                    animation: "lpShimmer 1.5s infinite linear",
+                                }}
+                            />
+                            {/* Spinner */}
+                            <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                className="h-7 w-7 text-white/40"
+                                style={{ animation: "lpSpin 0.9s linear infinite" }}
+                            >
+                                <circle
+                                    cx="12" cy="12" r="9"
+                                    stroke="currentColor"
+                                    strokeWidth="2.5"
+                                    strokeDasharray="42 14"
+                                    strokeLinecap="round"
+                                />
+                            </svg>
+                            <span className="select-none text-[11px] font-medium tracking-wide text-white/35">
+                                Loading preview…
+                            </span>
+                        </span>
+                    )}
+
+                    {/* Error / unavailable state */}
+                    {imageFailed && (
+                        <span className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
+                            <svg
+                                className="h-7 w-7 text-white/25"
+                                viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" strokeWidth="1.5"
+                                strokeLinecap="round" strokeLinejoin="round"
+                            >
+                                <rect x="3" y="3" width="18" height="18" rx="2" />
+                                <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor" stroke="none" />
+                                <path d="M21 15l-5-5L5 21" />
+                            </svg>
+                            <span className="select-none text-[11px] text-white/25">
+                                Preview unavailable
+                            </span>
+                        </span>
+                    )}
+
+                    {/* Real image — opacity-0 until loaded, then fades in */}
+                    <img
+                        src={imageSrc}
+                        alt=""
+                        onLoad={() => setImageLoaded(true)}
+                        onError={() => { if (!imageFailed) setImageFailed(true); }}
+                        className="absolute inset-0 h-full w-full object-cover"
+                        style={{
+                            opacity: imageLoaded ? 1 : 0,
+                            transition: "opacity 0.35s ease",
+                        }}
+                    />
+                </span>
+            )}
+
+            {/* Keyframes for shimmer sweep + spinner */}
+            <style>{`
+                @keyframes lpShimmer {
+                    0%   { background-position: -200% 0; }
+                    100% { background-position: 200% 0; }
+                }
+                @keyframes lpSpin {
+                    to { transform: rotate(360deg); }
+                }
+            `}</style>
+        </a>
+    );
+}
+
+
 // ── Sender label (group chat) ──────────────────────────────────────────────────
 function SenderLabel({ msg }: { msg: Message }) {
     if (!msg.senderName) return null;
@@ -1249,7 +1387,7 @@ function AlbumBubble({
                     })}
                 </div>
                 {caption && (
-                    <span className="mt-1 block px-2 pb-0.5" style={{ wordBreak: "break-word" }}>
+                    <span className="mt-1 block whitespace-pre-wrap px-2 pb-0.5" style={{ wordBreak: "break-word" }}>
                         <MessageText text={caption} />
                     </span>
                 )}
@@ -1370,9 +1508,23 @@ function Bubble({
                     </div>
                 )}
                 {msg?.text && (
-                    <span className={isVisualMedia ? "mt-1 block px-2 pb-1" : ""}>
+                    <span
+                        className={`whitespace-pre-wrap ${
+                            isVisualMedia ? "mt-1 block px-2 pb-1" : ""
+                        }`}
+                    >
                         <MessageText text={msg?.text} />
                     </span>
+                )}
+                {msg?.linkPreview && (
+                    <LinkPreviewCard
+                        preview={msg.linkPreview}
+                        imageUrl={
+                            (msg.linkPreview.hasImage || !!msg.linkPreview.thumb)
+                                ? mediaUrl(msg.id, { thumb: true })
+                                : undefined
+                        }
+                    />
                 )}
                 {(!isVisualMedia || msg?.text) && (
                     <span className={isVisualMedia ? "block px-2 pb-1 text-right" : "float-right mt-1 -mb-0.5"}>

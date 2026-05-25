@@ -8,6 +8,7 @@ import {
   telegramLinkTarget,
   type ChatNavUser,
 } from "./ChatNavContext";
+import { UnreadProvider } from "./UnreadContext";
 import GroupsGrid, {
   type ChatFolder,
   type Group,
@@ -554,6 +555,7 @@ export default function Dashboard({
 
   return (
     <ChatNavProvider value={chatNav}>
+      <UnreadProvider sessionString={session}>
       <div className="flex h-dvh flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-950">
         <Header
           user={user}
@@ -567,6 +569,7 @@ export default function Dashboard({
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <Sidebar
             activeMenu={activeMenu}
+            sessionString={session}
             onMenuChange={handleMenuChange}
             collapsed={collapsed}
             onToggle={() => setCollapsed(!collapsed)}
@@ -888,6 +891,7 @@ export default function Dashboard({
           </main>
         </div>
       </div>
+      </UnreadProvider>
     </ChatNavProvider>
   );
 }

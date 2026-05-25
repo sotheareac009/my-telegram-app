@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { useCallback, useState, useRef, useEffect, useLayoutEffect } from "react";
 import { useChatNav, telegramLinkTarget } from "./ChatNavContext";
 import { useForwardJobs } from "./ForwardJobsContext";
 import DialogAvatar from "./DialogAvatar";
@@ -238,6 +238,65 @@ async function measureImage(
         };
         img.src = url;
     });
+}
+
+/**
+ * Trigger an action menu on either right-click (desktop) or a long-press
+ * (mobile). The returned props are meant to be spread on the same element that
+ * previously held just `onContextMenu`.
+ */
+function useActionMenu(
+    onTrigger: ((clientX: number, clientY: number) => void) | undefined,
+): {
+    onContextMenu?: (e: React.MouseEvent) => void;
+    onTouchStart?: (e: React.TouchEvent) => void;
+    onTouchMove?: (e: React.TouchEvent) => void;
+    onTouchEnd?: () => void;
+    onTouchCancel?: () => void;
+} {
+    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const startRef = useRef<{ x: number; y: number } | null>(null);
+    const cancel = useCallback(() => {
+        if (timerRef.current !== null) {
+            clearTimeout(timerRef.current);
+            timerRef.current = null;
+        }
+        startRef.current = null;
+    }, []);
+    useEffect(() => cancel, [cancel]);
+    if (!onTrigger) return {};
+    return {
+        onContextMenu: (e) => {
+            e.preventDefault();
+            onTrigger(e.clientX, e.clientY);
+        },
+        onTouchStart: (e) => {
+            const t = e.touches[0];
+            if (!t) return;
+            startRef.current = { x: t.clientX, y: t.clientY };
+            timerRef.current = setTimeout(() => {
+                if (startRef.current) {
+                    onTrigger(startRef.current.x, startRef.current.y);
+                }
+                timerRef.current = null;
+            }, 500);
+        },
+        onTouchMove: (e) => {
+            const start = startRef.current;
+            if (!start) return;
+            const t = e.touches[0];
+            if (!t) return;
+            // Treat any scroll/scroll-attempt as "user is not long-pressing".
+            if (
+                Math.abs(t.clientX - start.x) > 10 ||
+                Math.abs(t.clientY - start.y) > 10
+            ) {
+                cancel();
+            }
+        },
+        onTouchEnd: cancel,
+        onTouchCancel: cancel,
+    };
 }
 
 /** Build a chat-media stream URL for a message attachment. */
@@ -574,7 +633,7 @@ function MediaContent({
             <div className="flex flex-col gap-1 py-1">
                 <audio src={url} controls className="h-9 max-w-[240px]" />
                 {media?.kind === "audio" && media?.fileName && (
-                    <span className="max-w-[240px] truncate text-[11px] text-[#8a9aaa]">
+                    <span className="max-w-[240px] truncate text-[11px] text-[#8a9aaa] dark:text-zinc-400">
                         {media.fileName}
                     </span>
                 )}
@@ -601,10 +660,10 @@ function MediaContent({
                 </svg>
             </span>
             <span className="min-w-0">
-                <span className="block max-w-[180px] truncate text-[13px] font-medium text-[#111]">
+                <span className="block max-w-[180px] truncate text-[13px] font-medium text-[#111] dark:text-zinc-100">
                     {media.fileName || "File"}
                 </span>
-                <span className="block text-[11px] text-[#8a9aaa]">
+                <span className="block text-[11px] text-[#8a9aaa] dark:text-zinc-400">
                     {formatFileSize(media.fileSize) || "Download"}
                 </span>
             </span>
@@ -638,7 +697,7 @@ function ContactCard({ media }: { media: ChatMedia }) {
                 {name.charAt(0).toUpperCase()}
             </span>
             <span className="min-w-0">
-                <span className="block truncate text-[13.5px] font-semibold text-[#111]">
+                <span className="block truncate text-[13.5px] font-semibold text-[#111] dark:text-zinc-100">
                     {name}
                 </span>
                 <span className="block truncate text-[11.5px] text-[#3390ec]">
@@ -655,7 +714,11 @@ function MessageText({ text }: { text: string }) {
     if (!text) return null;
 
     // Fresh regex per call — a /g regex carries mutable lastIndex state.
-    const linkRe = /(https?:\/\/[^\s<]+|t\.me\/[^\s<]+|www\.[^\s<]+)/gi;
+    // The `@username` branch matches Telegram's 5–32 char rule (letter, then
+    // letters/digits/underscores). A lookbehind for non-word chars stops us
+    // from matching the middle of an email or another token.
+    const linkRe =
+        /(https?:\/\/[^\s<]+|t\.me\/[^\s<]+|www\.[^\s<]+|(?<![\w@])@[a-zA-Z][a-zA-Z0-9_]{3,31})/g;
     const out: React.ReactNode[] = [];
     let last = 0;
     let key = 0;
@@ -663,11 +726,28 @@ function MessageText({ text }: { text: string }) {
     while ((m = linkRe.exec(text)) !== null) {
         if (m.index > last) out.push(text.slice(last, m.index));
         const raw = m[0];
-        // Trailing sentence punctuation isn't part of the URL.
+        // Trailing sentence punctuation isn't part of the URL/mention.
         const clean = raw.replace(/[.,!?;:)]+$/, "");
         const trailing = raw.slice(clean.length);
-        const tgTarget = telegramLinkTarget(clean);
-        if (tgTarget && nav) {
+        const isMention = clean.startsWith("@");
+        const tgTarget = isMention ? null : telegramLinkTarget(clean);
+        if (isMention && nav) {
+            // Username mention — open the user's chat via the same resolver
+            // path as a t.me link.
+            const username = clean.slice(1);
+            out.push(
+                <button
+                    key={key++}
+                    type="button"
+                    onClick={() =>
+                        nav.openTelegramLink(`https://t.me/${username}`)
+                    }
+                    className="cursor-pointer text-[#3390ec] hover:underline"
+                >
+                    {clean}
+                </button>,
+            );
+        } else if (tgTarget && nav) {
             // Telegram link (public username or private invite) — resolve and
             // open inside the app.
             out.push(
@@ -680,6 +760,10 @@ function MessageText({ text }: { text: string }) {
                     {clean}
                 </button>,
             );
+        } else if (isMention) {
+            // No nav context (shouldn't really happen inside a chat bubble) —
+            // fall through as plain text so we don't show a broken button.
+            out.push(clean);
         } else {
             const href = clean.startsWith("http") ? clean : `https://${clean}`;
             out.push(
@@ -778,7 +862,7 @@ function ForwardLabel({
                 padded ? "px-2 pt-1" : ""
             }`}
         >
-            <span className="shrink-0 text-[#8a9aaa]">Forwarded from</span>
+            <span className="shrink-0 text-[#8a9aaa] dark:text-zinc-400">Forwarded from</span>
             {canOpen ? (
                 <button
                     type="button"
@@ -809,14 +893,16 @@ function AlbumBubble({
     mediaUrl,
     onOpenViewer,
     isGroup = false,
-    onContextMenu,
+    onActionMenu,
     sessionString = "",
 }: {
     messages: Message[];
     mediaUrl: MediaUrlFn;
     onOpenViewer: (items: ViewerItem[], index: number) => void;
     isGroup?: boolean;
-    onContextMenu?: (e: React.MouseEvent) => void;
+    /** Open the actions menu (forward / delete) at the given screen point.
+     * Fires on desktop right-click OR mobile long-press. */
+    onActionMenu?: (clientX: number, clientY: number) => void;
     sessionString?: string;
 }) {
     const fromMe = messages[0].fromMe;
@@ -833,15 +919,16 @@ function AlbumBubble({
 
     const n = cells.length;
     const cols = n === 1 ? 1 : n === 2 || n === 4 ? 2 : 3;
+    const actionHandlers = useActionMenu(onActionMenu);
 
     return (
         <div className={`flex ${fromMe ? "justify-end" : "justify-start"} mb-1`}>
             <div
-                onContextMenu={onContextMenu}
+                {...actionHandlers}
                 className={`relative max-w-[280px] overflow-hidden rounded-2xl p-1 text-sm shadow-sm ${
                     fromMe
-                        ? "bg-[#effdde] rounded-br-sm"
-                        : "bg-white rounded-bl-sm"
+                        ? "bg-[#effdde] dark:bg-[#2b5278] rounded-br-sm"
+                        : "bg-white dark:bg-zinc-900 rounded-bl-sm"
                 }`}
             >
                 {isGroup && !fromMe && (
@@ -900,7 +987,7 @@ function AlbumBubble({
                         <MessageText text={caption} />
                     </span>
                 )}
-                <span className="block px-2 pb-1 text-right text-[10px] leading-none text-[#aab8c2] select-none">
+                <span className="block px-2 pb-1 text-right text-[10px] leading-none text-[#aab8c2] dark:text-zinc-500 select-none">
                     {formatTime(last.timestamp)}
                     {fromMe && <Ticks status={last.status} />}
                 </span>
@@ -915,20 +1002,23 @@ function Bubble({
     mediaUrl,
     onOpenViewer,
     isGroup = false,
-    onContextMenu,
+    onActionMenu,
     sessionString = "",
 }: {
     msg: Message;
     mediaUrl: MediaUrlFn;
     onOpenViewer: (items: ViewerItem[], index: number) => void;
     isGroup?: boolean;
-    onContextMenu?: (e: React.MouseEvent) => void;
+    /** Open the actions menu (forward / delete) — fires on right-click or
+     * long-press. */
+    onActionMenu?: (clientX: number, clientY: number) => void;
     sessionString?: string;
 }) {
+    const actionHandlers = useActionMenu(onActionMenu);
     const media = msg?.media;
     const showSender = isGroup && !msg?.fromMe && !!msg?.senderName;
     const metaRow = (
-        <span className="ml-2 whitespace-nowrap text-[10px] leading-none text-[#aab8c2] select-none">
+        <span className="ml-2 whitespace-nowrap text-[10px] leading-none text-[#aab8c2] dark:text-zinc-500 select-none">
             {media?.kind === "video" || media?.kind === "voice" || media?.kind === "audio"
                 ? formatDuration(media?.duration) + " · "
                 : ""}
@@ -950,7 +1040,7 @@ function Bubble({
     if (media?.kind === "sticker") {
         return (
             <div className={`flex ${msg.fromMe ? "justify-end" : "justify-start"} mb-1`}>
-                <div className="relative" onContextMenu={onContextMenu}>
+                <div className="relative" {...actionHandlers}>
                     <MediaContent
                         media={media}
                         url={mediaUrl(msg?.id)}
@@ -972,13 +1062,13 @@ function Bubble({
     return (
         <div className={`flex ${msg?.fromMe ? "justify-end" : "justify-start"} mb-1`}>
             <div
-                onContextMenu={onContextMenu}
+                {...actionHandlers}
                 className={`
                     relative max-w-[75%] rounded-2xl text-sm leading-relaxed
                     ${isVisualMedia ? "overflow-hidden p-1" : "px-3 py-2"}
                     ${msg?.fromMe
-                        ? "bg-[#effdde] text-[#111] rounded-br-sm shadow-sm"
-                        : "bg-white text-[#111] rounded-bl-sm shadow-sm"
+                        ? "bg-[#effdde] dark:bg-[#2b5278] text-[#111] dark:text-zinc-100 rounded-br-sm shadow-sm"
+                        : "bg-white dark:bg-zinc-900 text-[#111] dark:text-zinc-100 rounded-bl-sm shadow-sm"
                     }
                 `}
                 style={{ wordBreak: "break-word" }}
@@ -1035,12 +1125,16 @@ function ChatMediaViewer({
     mediaUrl,
     onClose,
     onIndex,
+    onForward,
 }: {
     items: ViewerItem[];
     index: number;
     mediaUrl: MediaUrlFn;
     onClose: () => void;
     onIndex: (next: number) => void;
+    /** Open the forward picker for this message and close the viewer. Hidden
+     * if not provided (e.g. read-only or no session). */
+    onForward?: (messageId: string) => void;
 }) {
     const item = items[index];
     const multiple = items.length > 1;
@@ -1061,22 +1155,58 @@ function ChatMediaViewer({
 
     if (!item) return null;
 
+    const downloadUrl = mediaUrl(item.messageId, { download: true });
+
     return (
         <div
             className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4"
             onClick={onClose}
         >
-            <button
-                type="button"
-                onClick={onClose}
-                className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
-                aria-label="Close"
+            {/* Top-right toolbar: download / forward / close. Each button is
+                a small frosted pill so they read on top of any media. */}
+            <div
+                className="absolute right-4 top-4 flex items-center gap-2"
+                onClick={(e) => e.stopPropagation()}
             >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-            </button>
+                <a
+                    href={downloadUrl}
+                    download
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+                    aria-label="Download"
+                    title="Download"
+                >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                </a>
+                {onForward && (
+                    <button
+                        type="button"
+                        onClick={() => onForward(item.messageId)}
+                        className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 cursor-pointer"
+                        aria-label="Forward"
+                        title="Forward"
+                    >
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="15 17 20 12 15 7" />
+                            <path d="M4 18v-2a4 4 0 0 1 4-4h12" />
+                        </svg>
+                    </button>
+                )}
+                <button
+                    type="button"
+                    onClick={onClose}
+                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 cursor-pointer"
+                    aria-label="Close"
+                >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
+            </div>
 
             {multiple && (
                 <>
@@ -1086,7 +1216,7 @@ function ChatMediaViewer({
                             e.stopPropagation();
                             onIndex((index - 1 + items.length) % items.length);
                         }}
-                        className="absolute left-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+                        className="absolute left-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 cursor-pointer"
                         aria-label="Previous"
                     >
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1099,7 +1229,7 @@ function ChatMediaViewer({
                             e.stopPropagation();
                             onIndex((index + 1) % items.length);
                         }}
-                        className="absolute right-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+                        className="absolute right-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 cursor-pointer"
                         aria-label="Next"
                     >
                         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1150,7 +1280,7 @@ function ChatMediaViewer({
 function DateDivider({ label }: { label: string }) {
     return (
         <div className="flex justify-center my-3">
-            <span className="bg-[#ffffffcc] text-[#8a9aaa] text-[11px] px-3 py-1 rounded-full select-none backdrop-blur-sm shadow-sm">
+            <span className="bg-[#ffffffcc] text-[#8a9aaa] dark:text-zinc-400 text-[11px] px-3 py-1 rounded-full select-none backdrop-blur-sm shadow-sm">
                 {label}
             </span>
         </div>
@@ -1190,7 +1320,7 @@ function OutgoingMediaBubble({
     return (
         <div className="flex justify-end mb-1">
             <div
-                className="relative overflow-hidden rounded-2xl rounded-br-sm bg-[#effdde] p-1 text-sm shadow-sm"
+                className="relative overflow-hidden rounded-2xl rounded-br-sm bg-[#effdde] dark:bg-[#2b5278] p-1 text-sm shadow-sm"
                 style={containerStyle}
             >
                 <div
@@ -1214,7 +1344,7 @@ function OutgoingMediaBubble({
                         <MessageText text={caption} />
                     </span>
                 )}
-                <span className="block px-2 pb-1 text-right text-[10px] leading-none text-[#aab8c2] select-none">
+                <span className="block px-2 pb-1 text-right text-[10px] leading-none text-[#aab8c2] dark:text-zinc-500 select-none">
                     {formatTime(new Date())}
                     <svg
                         className="ml-0.5 inline-block align-middle"
@@ -1332,7 +1462,7 @@ function UploadingTile({
 function TypingIndicator() {
     return (
         <div className="flex justify-start mb-2">
-            <div className="bg-white px-4 py-3 rounded-2xl rounded-bl-sm flex gap-1 items-center shadow-sm">
+            <div className="bg-white dark:bg-zinc-900 px-4 py-3 rounded-2xl rounded-bl-sm flex gap-1 items-center shadow-sm">
                 {[0, 1, 2].map((i) => (
                     <span
                         key={i}
@@ -1370,7 +1500,7 @@ function FilePreview({
     }, [file, isImage, isVideo]);
 
     return (
-        <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-[#f0f2f5]">
+        <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-gray-200 dark:border-zinc-800 bg-[#f0f2f5] dark:bg-zinc-800">
             {url && isImage ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -1392,7 +1522,7 @@ function FilePreview({
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                         <polyline points="14 2 14 8 20 8" />
                     </svg>
-                    <span className="line-clamp-2 break-all text-[8px] leading-tight text-[#8a9aaa]">
+                    <span className="line-clamp-2 break-all text-[8px] leading-tight text-[#8a9aaa] dark:text-zinc-400">
                         {file.name}
                     </span>
                 </div>
@@ -1512,10 +1642,9 @@ export default function TelegramChat({
         y: number;
         ids: string[];
     } | null>(null);
-    function handleContextMenu(e: React.MouseEvent, ids: string[]) {
+    function showActionMenu(clientX: number, clientY: number, ids: string[]) {
         if (!onDeleteMessage && !sessionString) return;
-        e.preventDefault();
-        setMenu({ x: e.clientX, y: e.clientY, ids });
+        setMenu({ x: clientX, y: clientY, ids });
     }
     useEffect(() => {
         if (!menu) return;
@@ -1908,11 +2037,11 @@ export default function TelegramChat({
             }}
         >
             {/* ── Header ── */}
-            <div className="flex items-center gap-3 px-4 py-2.5 bg-white border-b border-gray-200 shadow-sm shrink-0">
+            <div className="flex items-center gap-3 px-4 py-2.5 bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800 shadow-sm shrink-0">
                 {onBack && (
                     <button
                         onClick={onBack}
-                        className="text-[#8a9aaa] hover:text-[#3390ec] transition-colors p-1 -ml-1 rounded-full hover:bg-[#3390ec]/10"
+                        className="text-[#8a9aaa] dark:text-zinc-400 hover:text-[#3390ec] transition-colors p-1 -ml-1 rounded-full hover:bg-[#3390ec]/10"
                         aria-label="Back"
                     >
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
@@ -1924,8 +2053,8 @@ export default function TelegramChat({
                 <Avatar contact={contact} size="md" />
 
                 <div className="flex-1 min-w-0">
-                    <p className="text-[#111] font-medium text-[15px] truncate leading-tight">{name}</p>
-                    <p className="text-[#8a9aaa] text-[12px] truncate leading-tight">
+                    <p className="text-[#111] dark:text-zinc-100 font-medium text-[15px] truncate leading-tight">{name}</p>
+                    <p className="text-[#8a9aaa] dark:text-zinc-400 text-[12px] truncate leading-tight">
                         {contact.isOnline ? (
                             <span className="text-[#4dcd5e]">online</span>
                         ) : (
@@ -1935,7 +2064,7 @@ export default function TelegramChat({
                 </div>
 
                 {/* header actions */}
-                <div className="flex gap-1 text-[#8a9aaa]">
+                <div className="flex gap-1 text-[#8a9aaa] dark:text-zinc-400">
                     {onViewMedia && (
                         <button
                             type="button"
@@ -1970,7 +2099,7 @@ export default function TelegramChat({
             <div
                 ref={scrollRef}
                 onScroll={handleScroll}
-                className="flex-1 overflow-y-auto px-4 py-2 w-[550px] mx-auto border-r border-l border-gray-200"
+                className="flex-1 overflow-y-auto px-4 py-2 w-full max-w-[550px] mx-auto border-r border-l border-gray-200 dark:border-zinc-800"
                 style={{
                     backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%234a90d9' fill-opacity='0.06'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
                 }}
@@ -1981,12 +2110,12 @@ export default function TelegramChat({
                     </div>
                 ) : messages.length === 0 ? (
                     <div className="flex flex-col justify-center items-center h-full gap-3 select-none">
-                        <div className="w-16 h-16 rounded-full bg-white shadow flex items-center justify-center">
+                        <div className="w-16 h-16 rounded-full bg-white dark:bg-zinc-900 shadow flex items-center justify-center">
                             <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
                                 <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" stroke="#aab8c2" strokeWidth="1.5" strokeLinecap="round" />
                             </svg>
                         </div>
-                        <p className="text-[#aab8c2] text-sm">No messages yet. Say hello!</p>
+                        <p className="text-[#aab8c2] dark:text-zinc-500 text-sm">No messages yet. Say hello!</p>
                     </div>
                 ) : (
                     <>
@@ -2007,9 +2136,10 @@ export default function TelegramChat({
                                             onOpenViewer={openViewer}
                                             isGroup={isGroup}
                                             sessionString={sessionString}
-                                            onContextMenu={(e) =>
-                                                handleContextMenu(
-                                                    e,
+                                            onActionMenu={(x, y) =>
+                                                showActionMenu(
+                                                    x,
+                                                    y,
                                                     unit.map((m) => m.id),
                                                 )
                                             }
@@ -2022,8 +2152,8 @@ export default function TelegramChat({
                                             onOpenViewer={openViewer}
                                             isGroup={isGroup}
                                             sessionString={sessionString}
-                                            onContextMenu={(e) =>
-                                                handleContextMenu(e, [unit.id])
+                                            onActionMenu={(x, y) =>
+                                                showActionMenu(x, y, [unit.id])
                                             }
                                         />
                                     ),
@@ -2052,6 +2182,15 @@ export default function TelegramChat({
                     onIndex={(next) =>
                         setViewer((v) => (v ? { ...v, index: next } : v))
                     }
+                    onForward={
+                        sessionString
+                            ? (messageId) => {
+                                  setViewer(null);
+                                  setForwardIds([messageId]);
+                                  void loadDestinations();
+                              }
+                            : undefined
+                    }
                 />
             )}
 
@@ -2067,7 +2206,7 @@ export default function TelegramChat({
                         }}
                     />
                     <div
-                        className="fixed z-50 min-w-[170px] overflow-hidden rounded-xl border border-zinc-200 bg-white py-1 shadow-xl"
+                        className="fixed z-50 min-w-[170px] overflow-hidden rounded-xl border border-zinc-200 bg-white dark:bg-zinc-900 py-1 shadow-xl"
                         style={{
                             left: Math.min(menu.x, window.innerWidth - 190),
                             top: Math.min(menu.y, window.innerHeight - 60),
@@ -2124,7 +2263,7 @@ export default function TelegramChat({
                     onClick={() => setForwardIds(null)}
                 >
                     <div
-                        className="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-2xl"
+                        className="flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white dark:bg-zinc-900 shadow-2xl"
                         onClick={(e) => e.stopPropagation()}
                     >
                         <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
@@ -2152,7 +2291,7 @@ export default function TelegramChat({
                                 value={destSearch}
                                 onChange={(e) => setDestSearch(e.target.value)}
                                 placeholder="Search chats…"
-                                className="h-9 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 outline-none transition-colors focus:border-blue-400 focus:bg-white"
+                                className="h-9 w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 text-sm text-zinc-900 outline-none transition-colors focus:border-blue-400 focus:bg-white dark:bg-zinc-900"
                             />
                         </div>
                         <div className="min-h-0 flex-1 overflow-y-auto p-2">
@@ -2209,12 +2348,12 @@ export default function TelegramChat({
 
             {/* ── Banner (Join button etc.) — replaces the composer ── */}
             {banner ? (
-                <div className="shrink-0 border-t border-gray-200 bg-white px-3 py-2.5">
+                <div className="shrink-0 border-t border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2.5">
                     {banner}
                 </div>
             ) : readOnly ? null : (
             /* ── Input Bar ── */
-            <div className="shrink-0 px-3 py-2 bg-white border-t border-gray-200 w-[550px] mx-auto rounded-2xl">
+            <div className="shrink-0 px-3 py-2 bg-white dark:bg-zinc-900 border-t border-gray-200 dark:border-zinc-800 w-full max-w-[550px] mx-auto rounded-2xl">
                 <input
                     ref={fileInputRef}
                     type="file"
@@ -2239,7 +2378,7 @@ export default function TelegramChat({
                 )}
                 <div className="flex items-end gap-2">
                 {/* emoji button */}
-                <button className="text-[#8a9aaa] hover:text-[#3390ec] transition-colors p-2 rounded-full hover:bg-[#3390ec]/10 shrink-0 mb-0.5">
+                <button className="text-[#8a9aaa] dark:text-zinc-400 hover:text-[#3390ec] transition-colors p-2 rounded-full hover:bg-[#3390ec]/10 shrink-0 mb-0.5">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
                         <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" />
                         <path d="M8.5 14.5s1 1.5 3.5 1.5 3.5-1.5 3.5-1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -2249,7 +2388,7 @@ export default function TelegramChat({
                 </button>
 
                 {/* textarea */}
-                <div className="flex-1 bg-[#f0f2f5] rounded-2xl px-3 py-2 flex items-end gap-2">
+                <div className="flex-1 bg-[#f0f2f5] dark:bg-zinc-800 rounded-2xl px-3 py-2 flex items-end gap-2">
                     <textarea
                         ref={inputRef}
                         rows={1}
@@ -2259,7 +2398,7 @@ export default function TelegramChat({
                         placeholder={
                             pendingFiles.length > 0 ? "Add a caption…" : "Message"
                         }
-                        className="flex-1 bg-transparent text-[#111] placeholder-[#aab8c2] text-sm resize-none outline-none leading-relaxed max-h-[120px] overflow-y-auto"
+                        className="flex-1 bg-transparent text-[#111] dark:text-zinc-100 placeholder-[#aab8c2] dark:placeholder-zinc-500 text-sm resize-none outline-none leading-relaxed max-h-[120px] overflow-y-auto"
                         style={{ scrollbarWidth: "none" }}
                     />
                     {/* attach button */}
@@ -2268,7 +2407,7 @@ export default function TelegramChat({
                             type="button"
                             onClick={() => fileInputRef.current?.click()}
                             title="Attach photos, videos or files"
-                            className="text-[#8a9aaa] hover:text-[#3390ec] transition-colors shrink-0 mb-0.5"
+                            className="text-[#8a9aaa] dark:text-zinc-400 hover:text-[#3390ec] transition-colors shrink-0 mb-0.5"
                         >
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
                                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -2285,7 +2424,7 @@ export default function TelegramChat({
                         w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all duration-200 mb-0.5
                         ${input.trim() || pendingFiles.length > 0
                             ? "bg-[#3390ec] text-white shadow-lg shadow-[#3390ec]/30 scale-100 hover:scale-105"
-                            : "bg-[#f0f2f5] text-[#8a9aaa]"
+                            : "bg-[#f0f2f5] dark:bg-zinc-800 text-[#8a9aaa] dark:text-zinc-400"
                         }
                     `}
                     aria-label="Send"

@@ -370,20 +370,19 @@ export default function Dashboard({
 
   const openUserChat = useCallback(
     (user: ChatNavUser) => {
-      // If a chat overlay is already open, open this DM as a new level right
-      // there — don't navigate away to the My Contacts page.
-      if (chatOpenRef.current) {
-        openChat({
-          kind: "user",
-          id: user.id,
-          accessHash: user.accessHash,
-          title:
-            [user.firstName, user.lastName].filter(Boolean).join(" ") || "Chat",
-        });
-        return;
-      }
-      setPendingUserChat(user);
-      setActiveMenu("my-contacts");
+      // Always push DMs onto the chat stack as an overlay layer — the source
+      // chat (whether it's a group rendered in the main content area or an
+      // already-stacked chat) stays mounted underneath with its scroll intact.
+      // Back from this user chat pops one level, revealing the source chat at
+      // exactly the message the user was reading when they clicked the @mention
+      // / contact / link.
+      openChat({
+        kind: "user",
+        id: user.id,
+        accessHash: user.accessHash,
+        title:
+          [user.firstName, user.lastName].filter(Boolean).join(" ") || "Chat",
+      });
     },
     [openChat],
   );

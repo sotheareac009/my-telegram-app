@@ -434,16 +434,16 @@ export default function RecentChats({ sessionString }: { sessionString: string }
         return (
             <div className="flex flex-col h-full">
                 {/* Breadcrumb */}
-                <div className="flex items-center gap-2 px-4 py-2.5 bg-white border-b border-stone-200 shrink-0">
+                <div className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-zinc-900 border-b border-stone-200 dark:border-zinc-800 shrink-0">
                     <button
                         onClick={closeChat}
-                        className="flex items-center gap-1.5 text-[13px] font-medium text-stone-500 hover:text-indigo-500 transition-colors"
+                        className="flex items-center gap-1.5 text-[13px] font-medium text-stone-500 dark:text-zinc-400 hover:text-indigo-500 transition-colors"
                     >
                         <ArrowLeft size={15} />
                         Contacts
                     </button>
-                    <span className="text-stone-300 text-sm">/</span>
-                    <span className="text-[13px] font-medium text-stone-800 truncate">
+                    <span className="text-stone-300 dark:text-zinc-600 text-sm">/</span>
+                    <span className="text-[13px] font-medium text-stone-800 dark:text-zinc-200 truncate">
                         {`${selectedContact.firstName} ${selectedContact.lastName || ""}`.trim()}
                     </span>
                 </div>
@@ -475,26 +475,26 @@ export default function RecentChats({ sessionString }: { sessionString: string }
 
     // ── List / Grid view ───────────────────────────────────────────────────────
     return (
-        <div className="flex h-full flex-col bg-stone-50">
+        <div className="flex h-full flex-col bg-stone-50 dark:bg-zinc-950">
 
             {/* ── Header ── */}
-            <div className="sticky top-0 z-10 bg-white border-b border-stone-200/80 px-6 pt-5 pb-4 shadow-[0_1px_6px_0_rgba(0,0,0,0.04)]">
+            <div className="sticky top-0 z-10 bg-white dark:bg-zinc-900 border-b border-stone-200 dark:border-zinc-800/80 px-6 pt-5 pb-4 shadow-[0_1px_6px_0_rgba(0,0,0,0.04)]">
                 <div className="flex items-center justify-between mb-4">
                     <div>
-                        <h2 className="text-[18px] font-semibold tracking-tight text-stone-900 leading-tight">
+                        <h2 className="text-[18px] font-semibold tracking-tight text-stone-900 dark:text-zinc-100 leading-tight">
                             Contacts
                         </h2>
-                        <p className="text-[11px] font-mono text-stone-400 mt-0.5">
+                        <p className="text-[11px] font-mono text-stone-400 dark:text-zinc-500 mt-0.5">
                             Page {page} of {totalPages}
                         </p>
                     </div>
 
-                    <div className="flex items-center gap-1 bg-stone-100 rounded-xl p-1 border border-stone-200">
+                    <div className="flex items-center gap-1 bg-stone-100 dark:bg-zinc-800 rounded-xl p-1 border border-stone-200 dark:border-zinc-800">
                         <button
                             onClick={() => setView("list")}
                             className={`flex items-center justify-center rounded-lg p-2 transition-all duration-150 ${view === "list"
-                                ? "bg-white text-stone-900 shadow-sm border border-stone-200"
-                                : "text-stone-400 hover:text-stone-600"
+                                ? "bg-white dark:bg-zinc-900 text-stone-900 dark:text-zinc-100 shadow-sm border border-stone-200 dark:border-zinc-800"
+                                : "text-stone-400 dark:text-zinc-500 hover:text-stone-600 dark:text-zinc-400"
                                 }`}
                         >
                             <List size={15} />
@@ -502,8 +502,8 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                         <button
                             onClick={() => setView("grid")}
                             className={`flex items-center justify-center rounded-lg p-2 transition-all duration-150 ${view === "grid"
-                                ? "bg-white text-stone-900 shadow-sm border border-stone-200"
-                                : "text-stone-400 hover:text-stone-600"
+                                ? "bg-white dark:bg-zinc-900 text-stone-900 dark:text-zinc-100 shadow-sm border border-stone-200 dark:border-zinc-800"
+                                : "text-stone-400 dark:text-zinc-500 hover:text-stone-600 dark:text-zinc-400"
                                 }`}
                         >
                             <LayoutGrid size={15} />
@@ -513,18 +513,18 @@ export default function RecentChats({ sessionString }: { sessionString: string }
 
                 <div className="flex gap-2">
                     <div className="relative flex-1">
-                        <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" />
+                        <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 dark:text-zinc-500 pointer-events-none" />
                         <input
                             value={searchInput}
                             onChange={(e) => setSearchInput(e.target.value)}
                             onKeyDown={(e) => e.key === "Enter" && handleSearch()}
                             placeholder="Search contacts…"
-                            className="w-full bg-stone-100 border border-stone-200 text-stone-800 text-[13.5px] placeholder-stone-400 rounded-xl py-2.5 pl-9 pr-9 outline-none transition-all focus:bg-white focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50"
+                            className="w-full bg-stone-100 dark:bg-zinc-800 border border-stone-200 dark:border-zinc-800 text-stone-800 dark:text-zinc-200 text-[13.5px] placeholder-stone-400 rounded-xl py-2.5 pl-9 pr-9 outline-none transition-all focus:bg-white dark:bg-zinc-900 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50"
                         />
                         {searchInput && (
                             <button
                                 onClick={clearSearch}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600 transition-colors"
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400 dark:text-zinc-500 hover:text-stone-600 dark:text-zinc-400 transition-colors"
                             >
                                 <X size={13} />
                             </button>
@@ -543,13 +543,13 @@ export default function RecentChats({ sessionString }: { sessionString: string }
             <div className="flex-1 overflow-y-auto min-h-0">
                 {loading ? (
                     <div className="flex flex-col items-center justify-center h-48 gap-3">
-                        <div className="w-6 h-6 rounded-full border-2 border-stone-200 border-t-indigo-500 animate-spin" />
-                        <span className="text-[13px] text-stone-400">Loading contacts…</span>
+                        <div className="w-6 h-6 rounded-full border-2 border-stone-200 dark:border-zinc-800 border-t-indigo-500 animate-spin" />
+                        <span className="text-[13px] text-stone-400 dark:text-zinc-500">Loading contacts…</span>
                     </div>
                 ) : contacts.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-48 gap-2">
                         <span className="text-3xl opacity-30">🔍</span>
-                        <span className="text-[13px] text-stone-400">No contacts found</span>
+                        <span className="text-[13px] text-stone-400 dark:text-zinc-500">No contacts found</span>
                     </div>
                 ) : view === "list" ? (
                     <div className="py-2">
@@ -560,14 +560,14 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                 <div
                                     key={contact.id}
                                     onClick={() => openChat(contact)}
-                                    className="flex items-center gap-3.5 px-6 py-3 hover:bg-white transition-colors cursor-pointer border-b border-stone-100 last:border-0"
+                                    className="flex items-center gap-3.5 px-6 py-3 hover:bg-white dark:hover:bg-zinc-800 dark:bg-zinc-900 transition-colors cursor-pointer border-b border-stone-100 dark:border-zinc-800 last:border-0"
                                 >
                                     <ContactAvatar contact={contact} name={name} gradient={gradient} />
                                     <div className="min-w-0 flex-1">
-                                        <p className="text-[13.5px] font-medium text-stone-800 truncate leading-tight">
+                                        <p className="text-[13.5px] font-medium text-stone-800 dark:text-zinc-200 truncate leading-tight">
                                             {name}
                                         </p>
-                                        <p className="text-[11.5px] font-mono text-stone-400 truncate mt-0.5">
+                                        <p className="text-[11.5px] font-mono text-stone-400 dark:text-zinc-500 truncate mt-0.5">
                                             {contact.username ? `@${contact.username}` : contact.phone}
                                         </p>
                                     </div>
@@ -589,7 +589,7 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                 <div
                                     key={contact.id}
                                     onClick={() => openChat(contact)}
-                                    className="relative bg-white border border-stone-200 rounded-2xl p-4 text-center cursor-pointer hover:-translate-y-0.5 hover:shadow-md hover:shadow-stone-200/80 hover:border-stone-300 transition-all duration-150"
+                                    className="relative bg-white dark:bg-zinc-900 border border-stone-200 dark:border-zinc-800 rounded-2xl p-4 text-center cursor-pointer hover:-translate-y-0.5 hover:shadow-md hover:shadow-stone-200/80 hover:border-stone-300 dark:border-zinc-700 transition-all duration-150"
                                 >
                                     {!!contact.unreadCount && (
                                         <span className="absolute right-2 top-2 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-indigo-500 px-1.5 text-[11px] font-semibold text-white">
@@ -603,10 +603,10 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                         size="lg"
                                         className="mx-auto mb-3"
                                     />
-                                    <p className="text-[13px] font-medium text-stone-800 truncate leading-tight">
+                                    <p className="text-[13px] font-medium text-stone-800 dark:text-zinc-200 truncate leading-tight">
                                         {name}
                                     </p>
-                                    <p className="text-[11px] font-mono text-stone-400 truncate mt-1">
+                                    <p className="text-[11px] font-mono text-stone-400 dark:text-zinc-500 truncate mt-1">
                                         {contact.username ? `@${contact.username}` : contact.phone}
                                     </p>
                                 </div>
@@ -617,11 +617,11 @@ export default function RecentChats({ sessionString }: { sessionString: string }
             </div>
 
             {/* ── Pagination ── */}
-            <div className="flex items-center justify-between px-6 py-3.5 border-t border-stone-200 bg-white">
+            <div className="flex items-center justify-between px-6 py-3.5 border-t border-stone-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
                 <button
                     disabled={page <= 1}
                     onClick={() => setPage((p) => p - 1)}
-                    className="flex items-center gap-1.5 text-[13px] font-medium text-stone-600 bg-stone-100 hover:bg-stone-200 border border-stone-200 px-3.5 py-2 rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="flex items-center gap-1.5 text-[13px] font-medium text-stone-600 dark:text-zinc-400 bg-stone-100 dark:bg-zinc-800 hover:bg-stone-200 dark:hover:bg-zinc-700 dark:bg-zinc-800 border border-stone-200 dark:border-zinc-800 px-3.5 py-2 rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                     <ChevronLeft size={14} />
                     Prev
@@ -643,7 +643,7 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                 <button
                     disabled={page >= totalPages}
                     onClick={() => setPage((p) => p + 1)}
-                    className="flex items-center gap-1.5 text-[13px] font-medium text-stone-600 bg-stone-100 hover:bg-stone-200 border border-stone-200 px-3.5 py-2 rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="flex items-center gap-1.5 text-[13px] font-medium text-stone-600 dark:text-zinc-400 bg-stone-100 dark:bg-zinc-800 hover:bg-stone-200 dark:hover:bg-zinc-700 dark:bg-zinc-800 border border-stone-200 dark:border-zinc-800 px-3.5 py-2 rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                 >
                     Next
                     <ChevronRight size={14} />

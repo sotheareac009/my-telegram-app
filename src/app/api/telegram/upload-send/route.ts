@@ -1,9 +1,10 @@
 import { createClient } from "@/lib/telegram";
 import { resolveUserPeer } from "@/lib/telegram-peer";
-import { promises as fsp, createWriteStream, createReadStream } from "node:fs";
+import { promises as fsp, createReadStream } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { randomBytes } from "node:crypto";
+import { Api, utils as telegramUtils, client as telegramClient } from "telegram";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,6 +19,28 @@ function safeId(s: string): string {
 interface UploadDescriptor {
   uploadId: string;
   filename: string;
+  /** Optional poster frame for videos, encoded as a base64 data URL. */
+  thumb?: string;
+  width?: number;
+  height?: number;
+  duration?: number;
+  mimeType?: string;
+}
+
+/** Decode a `data:image/jpeg;base64,…` URL to disk and return the temp path. */
+async function writeThumbFromDataUrl(
+  dataUrl: string,
+): Promise<{ path: string; dir: string } | null> {
+  const match = /^data:image\/(jpe?g|png);base64,(.+)$/i.exec(dataUrl);
+  if (!match) return null;
+  const ext = match[1].toLowerCase().startsWith("jp") ? "jpg" : "png";
+  const buf = Buffer.from(match[2], "base64");
+  if (buf.length === 0) return null;
+  const dir = join(tmpdir(), `tg_thumb_${randomBytes(8).toString("hex")}`);
+  await fsp.mkdir(dir, { recursive: true });
+  const path = join(dir, `thumb.${ext}`);
+  await fsp.writeFile(path, buf);
+  return { path, dir };
 }
 
 /** Stream-concat all `*.part` files under a chunk dir into one assembled file. */
@@ -38,18 +61,19 @@ async function assembleChunks(
   await fsp.mkdir(outDir, { recursive: true });
   const outPath = join(outDir, safeName);
 
-  const out = createWriteStream(outPath);
-  for (const part of parts) {
-    const src = createReadStream(join(partsDir, part));
-    await new Promise<void>((resolve, reject) => {
-      src.on("error", reject);
-      src.on("end", resolve);
-      src.pipe(out, { end: false });
-    });
+  // Sequential append — chunks are ~2 MB each, so the per-iteration buffer is
+  // small and we don't have to juggle pipe() backpressure across stream resets.
+  const outFh = await fsp.open(outPath, "w");
+  try {
+    for (const part of parts) {
+      const src = createReadStream(join(partsDir, part));
+      for await (const chunk of src) {
+        await outFh.write(chunk as Buffer);
+      }
+    }
+  } finally {
+    await outFh.close();
   }
-  await new Promise<void>((resolve, reject) => {
-    out.end((err: Error | null | undefined) => (err ? reject(err) : resolve()));
-  });
 
   return { path: outPath, dir: outDir };
 }
@@ -94,7 +118,15 @@ export async function POST(request: Request) {
       (u): u is UploadDescriptor =>
         !!u && typeof u.uploadId === "string" && u.uploadId.length > 0,
     )
-    .map((u) => ({ uploadId: safeId(u.uploadId), filename: u.filename || "file" }));
+    .map((u) => ({
+      uploadId: safeId(u.uploadId),
+      filename: u.filename || "file",
+      thumb: typeof u.thumb === "string" ? u.thumb : undefined,
+      width: typeof u.width === "number" ? u.width : undefined,
+      height: typeof u.height === "number" ? u.height : undefined,
+      duration: typeof u.duration === "number" ? u.duration : undefined,
+      mimeType: typeof u.mimeType === "string" ? u.mimeType : undefined,
+    }));
   if (safeUploads.length === 0) {
     return Response.json({ error: "No valid uploads" }, { status: 400 });
   }
@@ -117,6 +149,21 @@ export async function POST(request: Request) {
           const result = await assembleChunks(u.uploadId, u.filename);
           assembled.push(result.path);
           cleanupDirs.push(result.dir);
+          // Log the assembled file's size + first 4 bytes so we can verify the
+          // chunks reassembled into a valid image/video header (FFD8 = JPEG,
+          // 89504E47 = PNG, 0000xxxx ftyp = MP4 box).
+          try {
+            const st = await fsp.stat(result.path);
+            const fh = await fsp.open(result.path, "r");
+            const head = Buffer.alloc(8);
+            await fh.read(head, 0, 8, 0);
+            await fh.close();
+            console.log(
+              `[upload-send] assembled ${u.filename}: size=${st.size} head=${head.toString("hex")}`,
+            );
+          } catch (logErr) {
+            console.warn("[upload-send] assembled stat failed:", logErr);
+          }
         }
 
         await client.connect();
@@ -131,16 +178,180 @@ export async function POST(request: Request) {
             );
 
         const text = typeof caption === "string" ? caption.trim() : "";
-        // A single file → one message; an array → a grouped album.
-        await client.sendFile(peer, {
-          file: assembled.length === 1 ? assembled[0] : assembled,
-          caption: text || undefined,
-          forceDocument: false,
-          supportsStreaming: true,
-          progressCallback: (progress: number) => {
-            emit({ kind: "progress", percent: progress });
-          },
-        });
+
+        if (safeUploads.length === 1) {
+          // Single-file send — gramjs' sendFile is enough here and accepts a
+          // thumb + per-file attributes directly.
+          let thumbFile: { path: string; dir: string } | undefined;
+          let attributes: Api.TypeDocumentAttribute[] | undefined;
+          const u = safeUploads[0];
+          if (u.thumb) {
+            const t = await writeThumbFromDataUrl(u.thumb);
+            if (t) {
+              thumbFile = t;
+              cleanupDirs.push(t.dir);
+            }
+          }
+          const isVideoMime =
+            typeof u.mimeType === "string" && u.mimeType.startsWith("video/");
+          if (isVideoMime && (u.width || u.height || u.duration)) {
+            attributes = [
+              new Api.DocumentAttributeVideo({
+                w: u.width ?? 1,
+                h: u.height ?? 1,
+                duration: u.duration ?? 0,
+                supportsStreaming: true,
+              }),
+            ];
+          }
+
+          const sent = await client.sendFile(peer, {
+            file: assembled[0],
+            caption: text || undefined,
+            forceDocument: false,
+            supportsStreaming: true,
+            thumb: thumbFile?.path,
+            attributes,
+            progressCallback: (progress: number) => {
+              emit({ kind: "progress", percent: progress });
+            },
+          });
+          const sentArr = Array.isArray(sent) ? sent : [sent];
+          for (const m of sentArr) {
+            const mediaCtor = m?.media?.className ?? m?.media?.constructor?.name;
+            console.log(`[upload-send] sent: media=${mediaCtor}`);
+          }
+        } else {
+          // Album path. gramjs' high-level _sendAlbum doesn't accept per-file
+          // thumbs (it passes one global thumb to every file). We replicate
+          // its structure manually so each video gets its own poster frame.
+          // messages.UploadMedia / SendMultiMedia require a resolved InputPeer
+          // (sendFile resolves implicitly, raw invoke doesn't).
+          const inputPeer = await client.getInputEntity(peer);
+          const albumEntries: Api.InputSingleMedia[] = [];
+          for (let i = 0; i < safeUploads.length; i++) {
+            const u = safeUploads[i];
+            const filePath = assembled[i];
+            const stat = await fsp.stat(filePath);
+            const name = basename(filePath);
+
+            // 1. Upload the file bytes → InputFile/InputFileBig.
+            const fileHandle = await client.uploadFile({
+              file: new telegramClient.uploads.CustomFile(
+                name,
+                stat.size,
+                filePath,
+              ),
+              workers: 1,
+              onProgress: (p: number) => {
+                // Aggregate file progress across the album.
+                emit({
+                  kind: "progress",
+                  percent: (i + p) / safeUploads.length,
+                });
+              },
+            });
+
+            // 2. Decide photo vs document and build InputMediaUploaded* with
+            //    the per-file thumb + attributes we computed in the browser.
+            const ext = name.toLowerCase().split(".").pop() ?? "";
+            const isImage =
+              ext === "jpg" || ext === "jpeg" || ext === "png";
+
+            let uploaded: Api.TypeInputMedia;
+            if (isImage) {
+              uploaded = new Api.InputMediaUploadedPhoto({ file: fileHandle });
+            } else {
+              let thumbHandle: Api.TypeInputFile | undefined;
+              if (u.thumb) {
+                const t = await writeThumbFromDataUrl(u.thumb);
+                if (t) {
+                  cleanupDirs.push(t.dir);
+                  const tStat = await fsp.stat(t.path);
+                  thumbHandle = await client.uploadFile({
+                    file: new telegramClient.uploads.CustomFile(
+                      basename(t.path),
+                      tStat.size,
+                      t.path,
+                    ),
+                    workers: 1,
+                  });
+                }
+              }
+              const mime =
+                u.mimeType ||
+                (ext === "mp4"
+                  ? "video/mp4"
+                  : ext === "mov"
+                    ? "video/quicktime"
+                    : "application/octet-stream");
+              const attrs: Api.TypeDocumentAttribute[] = [
+                new Api.DocumentAttributeFilename({ fileName: name }),
+              ];
+              if (mime.startsWith("video/")) {
+                attrs.push(
+                  new Api.DocumentAttributeVideo({
+                    w: u.width ?? 1,
+                    h: u.height ?? 1,
+                    duration: u.duration ?? 0,
+                    supportsStreaming: true,
+                  }),
+                );
+              }
+              uploaded = new Api.InputMediaUploadedDocument({
+                file: fileHandle,
+                mimeType: mime,
+                attributes: attrs,
+                thumb: thumbHandle,
+              });
+            }
+
+            // 3. UploadMedia resolves the uploaded file into a stable photo /
+            //    document id we can reference from InputSingleMedia.
+            const resolved = await client.invoke(
+              new Api.messages.UploadMedia({
+                peer: inputPeer,
+                media: uploaded,
+              }),
+            );
+            let resolvedMedia: Api.TypeInputMedia;
+            if (resolved instanceof Api.MessageMediaPhoto && resolved.photo) {
+              resolvedMedia = new Api.InputMediaPhoto({
+                id: telegramUtils.getInputPhoto(resolved.photo),
+              });
+            } else if (
+              resolved instanceof Api.MessageMediaDocument &&
+              resolved.document
+            ) {
+              resolvedMedia = new Api.InputMediaDocument({
+                id: telegramUtils.getInputDocument(resolved.document),
+              });
+            } else {
+              throw new Error(
+                "Telegram returned unexpected media for album item",
+              );
+            }
+
+            albumEntries.push(
+              new Api.InputSingleMedia({
+                media: resolvedMedia,
+                // Caption only on the first item, matching the official client.
+                message: i === 0 ? text : "",
+                entities: [],
+              }),
+            );
+            console.log(
+              `[upload-send] album[${i}]: ${isImage ? "photo" : "document"} ${name}`,
+            );
+          }
+
+          await client.invoke(
+            new Api.messages.SendMultiMedia({
+              peer: peer as Api.TypeInputPeer | string,
+              multiMedia: albumEntries,
+            }),
+          );
+        }
         emit({ kind: "done" });
       } catch (error) {
         console.error("[upload-send] failed:", error);

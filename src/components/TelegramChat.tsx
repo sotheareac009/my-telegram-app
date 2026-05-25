@@ -125,6 +125,79 @@ function senderColor(id?: string): string {
     return SENDER_COLORS[Math.abs(h) % SENDER_COLORS.length];
 }
 
+/**
+ * Grab a poster frame from a video file as a JPEG data URL, plus the source
+ * video's real width/height/duration. Telegram needs this so the chat bubble
+ * has a poster to show — gramjs' server-side metadata extraction is a no-op,
+ * so we have to capture the frame in the browser the way Telegram Web does.
+ * Returns null if the browser can't decode the format (e.g. some HEVC .mov).
+ */
+async function extractVideoThumb(
+    file: File,
+): Promise<{
+    dataUrl: string;
+    width: number;
+    height: number;
+    duration: number;
+} | null> {
+    if (typeof document === "undefined") return null;
+    return new Promise((resolve) => {
+        const url = URL.createObjectURL(file);
+        const video = document.createElement("video");
+        let done = false;
+        const finish = (result: ReturnType<typeof extractVideoThumb> extends Promise<infer R> ? R : never) => {
+            if (done) return;
+            done = true;
+            URL.revokeObjectURL(url);
+            video.src = "";
+            resolve(result);
+        };
+
+        video.preload = "metadata";
+        video.muted = true;
+        video.playsInline = true;
+        video.src = url;
+
+        // Decoding failure (unsupported codec etc.) — fall back to no thumb.
+        video.onerror = () => finish(null);
+        // Belt-and-braces: some browsers stall without ever firing 'seeked'.
+        const timeout = setTimeout(() => finish(null), 5000);
+
+        video.onloadedmetadata = () => {
+            // Seek a tiny bit into the video — frame 0 is often black.
+            const dur = isFinite(video.duration) ? video.duration : 0;
+            video.currentTime = Math.min(0.1, dur / 2);
+        };
+        video.onseeked = () => {
+            clearTimeout(timeout);
+            try {
+                const w0 = video.videoWidth || 1;
+                const h0 = video.videoHeight || 1;
+                // Telegram caps thumbs around 320px on the long edge.
+                const maxEdge = 320;
+                const scale = Math.min(1, maxEdge / Math.max(w0, h0));
+                const w = Math.max(1, Math.round(w0 * scale));
+                const h = Math.max(1, Math.round(h0 * scale));
+                const canvas = document.createElement("canvas");
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext("2d");
+                if (!ctx) return finish(null);
+                ctx.drawImage(video, 0, 0, w, h);
+                const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+                finish({
+                    dataUrl,
+                    width: w0,
+                    height: h0,
+                    duration: Math.round(isFinite(video.duration) ? video.duration : 0),
+                });
+            } catch {
+                finish(null);
+            }
+        };
+    });
+}
+
 /** Build a chat-media stream URL for a message attachment. */
 function buildMediaUrl(
     sessionString: string,
@@ -1425,11 +1498,19 @@ export default function TelegramChat({
         // just via plain HTTP since the bytes still have to reach our server).
         const CHUNK_SIZE = 2 * 1024 * 1024;
 
-        const uploads = files.map((f) => ({
-            uploadId: crypto.randomUUID(),
-            filename: f.name || "file",
-            file: f,
-        }));
+        // For videos, extract a poster frame in the browser — gramjs' metadata
+        // extraction is a no-op so without this Telegram has no thumb to serve
+        // and the chat bubble ends up as a broken-image placeholder.
+        const uploads = await Promise.all(
+            files.map(async (f) => ({
+                uploadId: crypto.randomUUID(),
+                filename: f.name || "file",
+                file: f,
+                thumb: f.type.startsWith("video/")
+                    ? await extractVideoThumb(f)
+                    : null,
+            })),
+        );
 
         const totalChunks = uploads.reduce(
             (sum, u) => sum + Math.max(1, Math.ceil(u.file.size / CHUNK_SIZE)),
@@ -1479,6 +1560,12 @@ export default function TelegramChat({
                 uploads: uploads.map((u) => ({
                     uploadId: u.uploadId,
                     filename: u.filename,
+                    // Optional poster frame + measured dimensions for videos.
+                    thumb: u.thumb?.dataUrl,
+                    width: u.thumb?.width,
+                    height: u.thumb?.height,
+                    duration: u.thumb?.duration,
+                    mimeType: u.file.type || undefined,
                 })),
             }),
         });

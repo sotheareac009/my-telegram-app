@@ -1419,28 +1419,78 @@ export default function TelegramChat({
      * keep the files queued and surface the error.
      */
     async function uploadMedia(files: File[], caption: string) {
-        const form = new FormData();
-        form.set("sessionString", sessionString);
-        if (isGroup) {
-            form.set("chatId", contact.id);
-        } else {
-            form.set("userId", contact.id);
-            if (contact.accessHash) form.set("accessHash", contact.accessHash);
-        }
-        form.set("caption", caption);
-        for (const f of files) form.append("files", f);
+        // Chunked upload: split each file into 2 MB pieces and POST one piece
+        // per request. Avoids the body-size cap that 17 MB+ multipart bodies
+        // were hitting (same idea as Telegram Web's protocol-level chunking,
+        // just via plain HTTP since the bytes still have to reach our server).
+        const CHUNK_SIZE = 2 * 1024 * 1024;
 
-        const res = await fetch("/api/telegram/send-media", {
+        const uploads = files.map((f) => ({
+            uploadId: crypto.randomUUID(),
+            filename: f.name || "file",
+            file: f,
+        }));
+
+        const totalChunks = uploads.reduce(
+            (sum, u) => sum + Math.max(1, Math.ceil(u.file.size / CHUNK_SIZE)),
+            0,
+        );
+        let sentChunks = 0;
+
+        // ── Phase 1: ship each file's chunks to the staging endpoint. ──
+        for (const up of uploads) {
+            const total = Math.max(1, Math.ceil(up.file.size / CHUNK_SIZE));
+            for (let i = 0; i < total; i++) {
+                const start = i * CHUNK_SIZE;
+                const end = Math.min(start + CHUNK_SIZE, up.file.size);
+                const chunk = up.file.slice(start, end);
+                const res = await fetch("/api/telegram/upload-chunk", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/octet-stream",
+                        "X-Upload-Id": up.uploadId,
+                        "X-Chunk-Index": String(i),
+                    },
+                    body: chunk,
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => null);
+                    throw new Error(
+                        data?.error || `Chunk upload failed (HTTP ${res.status})`,
+                    );
+                }
+                sentChunks++;
+                // Phase 1 fills the first half of the progress bar (0 → 0.5).
+                setSendProgress((sentChunks / totalChunks) * 0.5);
+            }
+        }
+
+        // ── Phase 2: tell the server to assemble + send via gramjs. ──
+        const sendRes = await fetch("/api/telegram/upload-send", {
             method: "POST",
-            body: form,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                sessionString,
+                chatId: isGroup ? contact.id : undefined,
+                userId: isGroup ? undefined : contact.id,
+                accessHash:
+                    isGroup || !contact.accessHash ? undefined : contact.accessHash,
+                caption,
+                uploads: uploads.map((u) => ({
+                    uploadId: u.uploadId,
+                    filename: u.filename,
+                })),
+            }),
         });
-        if (!res.ok || !res.body) {
-            const data = await res.json().catch(() => null);
-            throw new Error(data?.error || `Upload failed (HTTP ${res.status})`);
+        if (!sendRes.ok || !sendRes.body) {
+            const data = await sendRes.json().catch(() => null);
+            throw new Error(
+                data?.error || `Send failed (HTTP ${sendRes.status})`,
+            );
         }
 
-        // NDJSON stream: progress events + a final done/error event.
-        const reader = res.body.getReader();
+        // Stream gramjs upload progress for phase 2 (0.5 → 1.0).
+        const reader = sendRes.body.getReader();
         const decoder = new TextDecoder();
         let buf = "";
         let errorMessage: string | null = null;
@@ -1463,7 +1513,9 @@ export default function TelegramChat({
                     event.kind === "progress" &&
                     typeof event.percent === "number"
                 ) {
-                    setSendProgress(event.percent);
+                    setSendProgress(
+                        0.5 + Math.max(0, Math.min(1, event.percent)) * 0.5,
+                    );
                 } else if (
                     event.kind === "error" &&
                     typeof event.message === "string"

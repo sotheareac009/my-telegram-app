@@ -50,6 +50,10 @@ interface ClientEntry {
   /** The detach function returned by addEventHandler so we can unsubscribe
    * cleanly on shutdown. */
   removeUpdateHandler: (() => void) | null;
+  /** Safety-net resync that re-runs getDialogs every 30 s so any updates the
+   * live stream missed (e.g. while other API routes were briefly the active
+   * gramjs connection) still surface within half a minute. */
+  resyncTimer: ReturnType<typeof setInterval> | null;
 }
 
 // Dev hot-reload safe — the module gets re-evaluated on file changes, so
@@ -146,6 +150,35 @@ function ensureMeta(
   return fresh;
 }
 
+/** Walk the dialog list and reconcile any drift between Telegram's actual
+ * per-chat unread and our in-memory snapshot. Emits a delta for each chat
+ * that changed so the browser's badges resync. */
+async function resyncSnapshot(entry: ClientEntry): Promise<void> {
+  const dialogs = await entry.client.getDialogs({ limit: 1000 });
+  const seen = new Set<string>();
+  for (const d of dialogs) {
+    const info = classify(d.entity);
+    if (!info) continue;
+    const unread = d.unreadCount ?? 0;
+    seen.add(info.markedId);
+    if (!entry.meta.has(info.markedId)) {
+      entry.meta.set(info.markedId, {
+        bucket: info.bucket,
+        markedId: info.markedId,
+      });
+    }
+    setUnread(entry, info.markedId, info.bucket, unread);
+  }
+  // Anything in perChat that no longer appears in dialogs (left chat, etc.)
+  // gets zeroed out so the badge isn't stuck.
+  for (const markedId of Object.keys(entry.snapshot.perChat)) {
+    if (seen.has(markedId)) continue;
+    const m = entry.meta.get(markedId);
+    if (!m) continue;
+    setUnread(entry, markedId, m.bucket, 0);
+  }
+}
+
 async function getOrCreateClient(
   sessionString: string,
 ): Promise<ClientEntry> {
@@ -177,6 +210,22 @@ async function getOrCreateClient(
     );
 
   await client.connect();
+
+  // Prime the update channel. Without these, gramjs has been observed to
+  // silently not deliver new-message updates until *some* other request
+  // triggers them. getMe seeds _selfInputPeer (the dispatcher guards on it
+  // before firing handlers) and updates.GetState forces Telegram to start
+  // pushing the live update stream to this connection.
+  try {
+    await client.getMe();
+  } catch (err) {
+    console.warn("[updates/stream] getMe prime failed:", err);
+  }
+  try {
+    await client.invoke(new Api.updates.GetState());
+  } catch (err) {
+    console.warn("[updates/stream] GetState prime failed:", err);
+  }
 
   const snapshot:
     UnreadSnapshot = {
@@ -270,7 +319,18 @@ async function getOrCreateClient(
       new Set(),
     removeUpdateHandler:
       null,
+    resyncTimer:
+      null,
   };
+
+  // Safety-net resync: re-walk the dialog list every 30 s and emit deltas
+  // for anything that drifted vs the in-memory snapshot. This keeps badges
+  // accurate even if the live push happened to be off briefly.
+  entry.resyncTimer = setInterval(() => {
+    void resyncSnapshot(entry).catch((err: unknown) =>
+      console.warn("[updates/stream] resync failed:", err),
+    );
+  }, 30_000);
 
   const newMessageEvent =
     new NewMessage({});
@@ -281,8 +341,12 @@ async function getOrCreateClient(
       event: any,
     ) => {
       try {
-        const msg =
-          event.message;
+        const msg = event.message;
+        console.log(
+          "[updates/stream] NewMessage fired:",
+          msg?.peerId?.className,
+          "out=" + (msg?.out ?? false),
+        );
 
         if (!msg)
           return;
@@ -328,6 +392,11 @@ async function getOrCreateClient(
       update: any,
     ) => {
       try {
+        const inner = update?.update ?? update;
+        const cls = inner?.className;
+        if (cls && cls !== "UpdateConnectionState") {
+          console.log("[updates/stream] raw:", cls);
+        }
         applyUpdate(
           entry,
           update,
@@ -387,6 +456,10 @@ function releaseClient(sessionString: string) {
   entry.shutdownTimer = setTimeout(async () => {
     if (entry.refs > 0) return;
     clients.delete(sessionString);
+    if (entry.resyncTimer) {
+      clearInterval(entry.resyncTimer);
+      entry.resyncTimer = null;
+    }
     try {
       entry.removeUpdateHandler?.();
     } catch {

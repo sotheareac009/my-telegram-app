@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/telegram";
+import { resolveUserPeer } from "@/lib/telegram-peer";
 import { Api, utils as telegramUtils } from "telegram";
 
 type Sender = {
@@ -177,19 +178,31 @@ export async function POST(request: Request) {
     const {
       sessionString,
       groupId,
+      userId,
+      accessHash,
       limit = 50,
       offsetId = 0,
       filter = "all",
     } = await request.json();
-    if (!sessionString || !groupId) {
+    if (!sessionString || (!groupId && !userId)) {
       return Response.json({ error: "Missing params" }, { status: 400 });
     }
 
     const client = createClient(sessionString);
     await client.connect();
 
+    // Peer: a group/channel marked id can be passed as-is; a user DM needs an
+    // explicit InputPeerUser so the cold client can resolve it.
+    const peer: string | Api.InputPeerUser = groupId
+      ? String(groupId)
+      : await resolveUserPeer(
+          client,
+          String(userId),
+          accessHash ? String(accessHash) : undefined,
+        );
+
     const apiFilter = buildMessagesFilter(filter);
-    const messages = await client.getMessages(groupId, {
+    const messages = await client.getMessages(peer, {
       limit,
       offsetId,
       ...(apiFilter ? { filter: apiFilter } : {}),
@@ -205,7 +218,7 @@ export async function POST(request: Request) {
         let scanned = 0;
         const SCAN_LIMIT = 60;
         while (scanned < SCAN_LIMIT) {
-          const more = await client.getMessages(groupId, {
+          const more = await client.getMessages(peer, {
             limit: 20,
             offsetId: extraOffsetId,
             ...(apiFilter ? { filter: apiFilter } : {}),

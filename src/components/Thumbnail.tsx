@@ -4,7 +4,12 @@ import { useEffect, useState } from "react";
 
 interface ThumbnailProps {
   session: string;
+  /** Either the group/channel marked id or the user id (when isUser=true). */
   groupId: string;
+  /** Set when groupId actually holds a user id — switches the API call to
+   * the userId/accessHash form. */
+  isUser?: boolean;
+  accessHash?: string;
   messageId: number;
   alt?: string;
   className?: string;
@@ -22,7 +27,9 @@ function thumbKey(session: string, groupId: string, messageId: number) {
 function loadThumb(
   session: string,
   groupId: string,
-  messageId: number
+  messageId: number,
+  isUser: boolean,
+  accessHash: string | undefined,
 ): Promise<ThumbCacheValue> {
   const key = thumbKey(session, groupId, messageId);
   const cached = thumbCache.get(key);
@@ -38,7 +45,9 @@ function loadThumb(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionString: session,
-          groupId,
+          ...(isUser
+            ? { userId: groupId, accessHash }
+            : { groupId }),
           messageId,
         }),
       });
@@ -65,6 +74,8 @@ function loadThumb(
 export default function Thumbnail({
   session,
   groupId,
+  isUser = false,
+  accessHash,
   messageId,
   alt = "",
   className = "",
@@ -97,7 +108,7 @@ export default function Thumbnail({
       return;
     }
 
-    void loadThumb(session, groupId, messageId).then((result) => {
+    void loadThumb(session, groupId, messageId, isUser, accessHash).then((result) => {
       if (cancelled) return;
       if (result === "failed") {
         if (!fallbackSrc) setStatus("error");

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import DialogAvatar from "./DialogAvatar";
+import { LayoutGrid, List } from "lucide-react";
+import { group } from "console";
 
 export interface Group {
   id: string;
@@ -73,6 +75,7 @@ export default function GroupsGrid({
   const loading = groups === null || folders === null;
   const [search, setSearch] = useState("");
   const perPage = 20;
+  const [view, setView] = useState<"list" | "grid">("list");
 
   useEffect(() => {
     if (!session) return;
@@ -117,12 +120,12 @@ export default function GroupsGrid({
 
   console.log("Rendering GroupsGrid", groups);
 
-        const totalUnread = groups?.reduce(
-        (sum, contact: any) => sum + contact.unreadCount,
-        0
-    );
+  const totalUnread = groups?.reduce(
+    (sum, contact: any) => sum + contact.unreadCount,
+    0
+  );
 
-    console.log("Total unread count:", totalUnread);
+  console.log("Total unread count:", totalUnread);
 
 
   return (
@@ -152,119 +155,178 @@ export default function GroupsGrid({
           </div>
         </div>
         {/* Folder pills */}
-        {visibleFolders.length > 0 && (
-          <div className="mt-3 flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
-            {[{ id: "all", title: "All" }, ...visibleFolders].map((folder) => {
-              const isActive = selectedFolderId === folder.id;
-              const count = folder.id === "all"
-                ? typedGroups.length
-                : typedGroups.filter((g) => g.folderIds.includes(folder.id)).length;
-              return (
-                <button
-                  key={folder.id}
-                  type="button"
-                  onClick={() => { onActiveFolderChange(folder.id); onPageChange(1); }}
-                  className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
-                    isActive
+        <div className="flex flex-row items-center justify-between mt-[0.5rem]">
+          {visibleFolders.length > 0 && (
+            <div className="mt-3 flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
+              {[{ id: "all", title: "All" }, ...visibleFolders].map((folder) => {
+                const isActive = selectedFolderId === folder.id;
+                const count = folder.id === "all"
+                  ? typedGroups.length
+                  : typedGroups.filter((g) => g.folderIds.includes(folder.id)).length;
+                return (
+                  <button
+                    key={folder.id}
+                    type="button"
+                    onClick={() => { onActiveFolderChange(folder.id); onPageChange(1); }}
+                    className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${isActive
                       ? "bg-blue-600 text-white shadow-sm shadow-blue-600/30"
                       : "border border-zinc-200 bg-white text-zinc-500 hover:border-zinc-300 hover:text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-zinc-300"
-                  }`}
-                >
-                  <span className="max-w-28 truncate">{folder.title}</span>
-                  <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${isActive ? "bg-white/20 text-white" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800"}`}>
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
+                      }`}
+                  >
+                    <span className="max-w-28 truncate">{folder.title}</span>
+                    <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${isActive ? "bg-white/20 text-white" : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800"}`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <div className="ml-1 mt-[0.5rem] flex items-center gap-1 bg-stone-100 dark:bg-zinc-800 rounded-xl p-1 border border-stone-200 dark:border-zinc-800">
+            <button
+              onClick={() => setView("list")}
+              className={`flex items-center justify-center rounded-lg p-2 transition-all duration-150 ${view === "list"
+                ? "bg-white dark:bg-zinc-900 text-stone-900 dark:text-zinc-100 shadow-sm border border-stone-200 dark:border-zinc-800"
+                : "text-stone-400 dark:text-zinc-500 hover:text-stone-600 dark:text-zinc-400"
+                }`}
+            >
+              <List size={10} />
+            </button>
+            <button
+              onClick={() => setView("grid")}
+              className={`flex items-center justify-center rounded-lg p-2 transition-all duration-150 ${view === "grid"
+                ? "bg-white dark:bg-zinc-900 text-stone-900 dark:text-zinc-100 shadow-sm border border-stone-200 dark:border-zinc-800"
+                : "text-stone-400 dark:text-zinc-500 hover:text-stone-600 dark:text-zinc-400"
+                }`}
+            >
+              <LayoutGrid size={10} />
+            </button>
           </div>
-        )}
+        </div>
+
+
       </div>
 
-      {/* Grid */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-        {loading ? (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-            {Array.from({ length: 10 }).map((_, i) => (
-              <div key={i} className="flex flex-col items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-                <div className="h-14 w-14 animate-pulse rounded-full bg-zinc-200 dark:bg-zinc-700" />
-                <div className="h-3 w-20 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700" />
-                <div className="h-2 w-28 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />
-              </div>
-            ))}
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-100 dark:bg-zinc-800">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-zinc-400">
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
-            </div>
-            <p className="mt-4 text-sm font-semibold text-zinc-600 dark:text-zinc-400">No {title.toLowerCase()} found</p>
-            <p className="mt-1 text-xs text-zinc-400">Try a different search term</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 cursor-pointer">
-            {paginated.map((group, index) => {
-              const globalIndex = (currentPage - 1) * perPage + index;
-              return (
-                <button
-                  key={group.id}
-                  onClick={() => onGroupSelect({ id: group.id, title: group.title })}
-                  className="cursor-pointer group relative flex flex-col items-center gap-3 rounded-2xl border border-zinc-200/80 bg-white p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg hover:shadow-blue-500/8 dark:border-zinc-800/80 dark:bg-zinc-900 dark:hover:border-blue-800"
-                >
-                  {/* Unread badge */}
-                  {group.unreadCount > 0 && (
-                    <span className="absolute right-2.5 top-2.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white shadow-sm">
-                      {group.unreadCount > 99 ? "99+" : group.unreadCount}
-                    </span>
-                  )}
-
-                  {/* Avatar */}
-                  <DialogAvatar
-                    session={session}
-                    groupId={group.id}
-                    title={group.title}
-                    fallbackClassName={getGradient(globalIndex)}
-                  />
-
-                  {/* Name */}
-                  <div className="w-full text-center">
-                    <p className="truncate text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
-                      {group.title}
-                    </p>
+      {view === "list" && (<>
+        <div className="py-2">
+          {paginated.map((group, index) => {
+            // const name = getName(group);
+            const globalIndex = (currentPage - 1) * perPage + index;
+            return (
+              <div
+                key={group.id}
+                onClick={() => onGroupSelect({ id: group.id, title: group.title })}
+                className="flex items-center gap-3.5 px-6 py-3 hover:bg-white dark:hover:bg-zinc-800 dark:bg-zinc-900 transition-colors cursor-pointer border-b border-stone-100 dark:border-zinc-800 last:border-0"
+              >
+                <DialogAvatar
+                  session={session}
+                  groupId={group.id}
+                  title={group.title}
+                  fallbackClassName={getGradient(globalIndex)}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13.5px] font-medium text-stone-800 dark:text-zinc-200 truncate leading-tight">
+                    {group.title}
+                  </p>
+                  <p className="text-[11.5px] font-mono text-stone-400 dark:text-zinc-500 truncate mt-0.5">
                     {group.lastMessage && (
                       <p className="mt-0.5 line-clamp-1 text-[11px] text-zinc-400">
                         {group.lastMessage}
                       </p>
                     )}
-                  </div>
-
-                  {/* Footer */}
-                  <div className="flex w-full items-center justify-between gap-1">
-                    <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${group.isChannel ? "bg-violet-50 text-violet-600 dark:bg-violet-950/40 dark:text-violet-400" : "bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400"}`}>
-                      {group.isChannel ? "Channel" : "Group"}
-                    </span>
-                    {group.date > 0 && (
-                      <span className="shrink-0 text-[10px] text-zinc-400">
-                        {formatTime(group.date)}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </>) || (<>
+        {/* Grid */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+          {loading ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <div key={i} className="flex flex-col items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+                  <div className="h-14 w-14 animate-pulse rounded-full bg-zinc-200 dark:bg-zinc-700" />
+                  <div className="h-3 w-20 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700" />
+                  <div className="h-2 w-28 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />
+                </div>
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24 text-center">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-zinc-100 dark:bg-zinc-800">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-zinc-400">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+              </div>
+              <p className="mt-4 text-sm font-semibold text-zinc-600 dark:text-zinc-400">No {title.toLowerCase()} found</p>
+              <p className="mt-1 text-xs text-zinc-400">Try a different search term</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 cursor-pointer">
+              {paginated.map((group, index) => {
+                const globalIndex = (currentPage - 1) * perPage + index;
+                return (
+                  <button
+                    key={group.id}
+                    onClick={() => onGroupSelect({ id: group.id, title: group.title })}
+                    className="cursor-pointer group relative flex flex-col items-center gap-3 rounded-2xl border border-zinc-200/80 bg-white p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg hover:shadow-blue-500/8 dark:border-zinc-800/80 dark:bg-zinc-900 dark:hover:border-blue-800"
+                  >
+                    {/* Unread badge */}
+                    {group.unreadCount > 0 && (
+                      <span className="absolute right-2.5 top-2.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white shadow-sm">
+                        {group.unreadCount > 99 ? "99+" : group.unreadCount}
                       </span>
                     )}
-                  </div>
 
-                  {/* Hover arrow */}
-                  <div className="absolute inset-x-0 bottom-0 flex justify-center opacity-0 transition-opacity group-hover:opacity-100">
-                    <span className="mb-2 rounded-full bg-blue-600 px-3 py-0.5 text-[10px] font-semibold text-white shadow-sm">
-                      Open →
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                    {/* Avatar */}
+                    <DialogAvatar
+                      session={session}
+                      groupId={group.id}
+                      title={group.title}
+                      fallbackClassName={getGradient(globalIndex)}
+                    />
+
+                    {/* Name */}
+                    <div className="w-full text-center">
+                      <p className="truncate text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
+                        {group.title}
+                      </p>
+                      {group.lastMessage && (
+                        <p className="mt-0.5 line-clamp-1 text-[11px] text-zinc-400">
+                          {group.lastMessage}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Footer */}
+                    <div className="flex w-full items-center justify-between gap-1">
+                      <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${group.isChannel ? "bg-violet-50 text-violet-600 dark:bg-violet-950/40 dark:text-violet-400" : "bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400"}`}>
+                        {group.isChannel ? "Channel" : "Group"}
+                      </span>
+                      {group.date > 0 && (
+                        <span className="shrink-0 text-[10px] text-zinc-400">
+                          {formatTime(group.date)}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Hover arrow */}
+                    <div className="absolute inset-x-0 bottom-0 flex justify-center opacity-0 transition-opacity group-hover:opacity-100">
+                      <span className="mb-2 rounded-full bg-blue-600 px-3 py-0.5 text-[10px] font-semibold text-white shadow-sm">
+                        Open →
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </>)}
+
 
       {/* Pagination */}
       {totalPages > 1 && (
@@ -284,11 +346,10 @@ export default function GroupsGrid({
               onClick={() => {
                 onPageChange(i + 1);
               }}
-              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[13px] font-semibold transition-colors ${
-                currentPage === i + 1
-                  ? "bg-blue-600 text-white shadow-sm"
-                  : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
-              }`}
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[13px] font-semibold transition-colors ${currentPage === i + 1
+                ? "bg-blue-600 text-white shadow-sm"
+                : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                }`}
             >
               {i + 1}
             </button>

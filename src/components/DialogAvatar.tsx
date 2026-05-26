@@ -75,7 +75,7 @@ export default function DialogAvatar({
   groupId,
   title,
   fallbackClassName,
-  sizeClassName = "h-14 w-14",
+  sizeClassName = "h-10 w-10",
   textClassName = "text-lg",
   accessHash,
   peerType,

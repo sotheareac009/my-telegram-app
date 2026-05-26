@@ -1,7 +1,30 @@
 import { createClient } from "@/lib/telegram";
 import { buildMediaInfo } from "@/lib/telegram-media";
 import { acquireDownloadSlot } from "@/lib/download-queue";
+import { resolveUserPeer } from "@/lib/telegram-peer";
+import { Api } from "telegram";
 import bigInt from "big-integer";
+
+/** Single descriptor for the chat we're downloading from — either a marked
+ * group/channel id (passed straight to gramjs) or a user DM peer that has to
+ * be resolved with the access hash first. */
+interface PeerLocator {
+  groupId?: string;
+  userId?: string;
+  accessHash?: string;
+}
+
+async function resolvePeer(
+  client: ReturnType<typeof createClient>,
+  loc: PeerLocator,
+): Promise<string | Api.InputPeerUser> {
+  if (loc.groupId) return String(loc.groupId);
+  return resolveUserPeer(
+    client,
+    String(loc.userId),
+    loc.accessHash ? String(loc.accessHash) : undefined,
+  );
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,7 +63,7 @@ function parseRange(
 
 async function streamMediaResponse(
   sessionString: string,
-  groupId: string,
+  loc: PeerLocator,
   messageId: number,
   mode: "inline" | "attachment",
   rangeHeader: string | null
@@ -69,7 +92,8 @@ async function streamMediaResponse(
   };
 
   try {
-    const messages = await client.getMessages(groupId, { ids: [messageId] });
+    const peer = await resolvePeer(client, loc);
+    const messages = await client.getMessages(peer, { ids: [messageId] });
     const msg = messages[0];
     if (!msg || !msg.media) {
       await cleanup();
@@ -186,18 +210,20 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const sessionString = searchParams.get("sessionString");
-    const groupId = searchParams.get("groupId");
+    const groupId = searchParams.get("groupId") || undefined;
+    const userId = searchParams.get("userId") || undefined;
+    const accessHash = searchParams.get("accessHash") || undefined;
     const messageId = Number(searchParams.get("messageId"));
     const mode =
       searchParams.get("download") === "1" ? "attachment" : "inline";
 
-    if (!sessionString || !groupId || !messageId) {
+    if (!sessionString || (!groupId && !userId) || !messageId) {
       return Response.json({ error: "Missing params" }, { status: 400 });
     }
 
     return await streamMediaResponse(
       sessionString,
-      groupId,
+      { groupId, userId, accessHash },
       messageId,
       mode,
       request.headers.get("range")
@@ -213,17 +239,20 @@ export async function HEAD(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const sessionString = searchParams.get("sessionString");
-    const groupId = searchParams.get("groupId");
+    const groupId = searchParams.get("groupId") || undefined;
+    const userId = searchParams.get("userId") || undefined;
+    const accessHash = searchParams.get("accessHash") || undefined;
     const messageId = Number(searchParams.get("messageId"));
 
-    if (!sessionString || !groupId || !messageId) {
+    if (!sessionString || (!groupId && !userId) || !messageId) {
       return new Response(null, { status: 400 });
     }
 
     const client = createClient(sessionString);
     await client.connect();
     try {
-      const messages = await client.getMessages(groupId, { ids: [messageId] });
+      const peer = await resolvePeer(client, { groupId, userId, accessHash });
+      const messages = await client.getMessages(peer, { ids: [messageId] });
       const msg = messages[0];
       if (!msg || !msg.media) return new Response(null, { status: 404 });
 
@@ -250,31 +279,37 @@ export async function POST(request: Request) {
   try {
     const contentType = request.headers.get("content-type") || "";
     let sessionString: string | null = null;
-    let groupId: string | null = null;
+    let groupId: string | undefined;
+    let userId: string | undefined;
+    let accessHash: string | undefined;
     let messageId = 0;
     let mode: "inline" | "attachment" = "inline";
 
     if (contentType.includes("application/json")) {
       const body = await request.json();
       sessionString = body.sessionString;
-      groupId = body.groupId;
+      groupId = body.groupId || undefined;
+      userId = body.userId || undefined;
+      accessHash = body.accessHash || undefined;
       messageId = Number(body.messageId);
       mode = body.download ? "attachment" : "inline";
     } else if (contentType.includes("application/x-www-form-urlencoded")) {
       const form = await request.formData();
       sessionString = String(form.get("sessionString") || "");
-      groupId = String(form.get("groupId") || "");
+      groupId = String(form.get("groupId") || "") || undefined;
+      userId = String(form.get("userId") || "") || undefined;
+      accessHash = String(form.get("accessHash") || "") || undefined;
       messageId = Number(form.get("messageId"));
       mode = form.get("download") === "1" ? "attachment" : "inline";
     }
 
-    if (!sessionString || !groupId || !messageId) {
+    if (!sessionString || (!groupId && !userId) || !messageId) {
       return Response.json({ error: "Missing params" }, { status: 400 });
     }
 
     return await streamMediaResponse(
       sessionString,
-      groupId,
+      { groupId, userId, accessHash },
       messageId,
       mode,
       request.headers.get("range")

@@ -1,17 +1,28 @@
 import { createClient } from "@/lib/telegram";
+import { resolveUserPeer } from "@/lib/telegram-peer";
 import { Api } from "telegram";
 
 export async function POST(request: Request) {
   try {
-    const { sessionString, groupId, messageId } = await request.json();
-    if (!sessionString || !groupId || !messageId) {
+    const { sessionString, groupId, userId, accessHash, messageId } =
+      await request.json();
+    if (!sessionString || (!groupId && !userId) || !messageId) {
       return Response.json({ error: "Missing params" }, { status: 400 });
     }
 
     const client = createClient(sessionString);
     await client.connect();
 
-    const messages = await client.getMessages(groupId, { ids: [messageId] });
+    // Group/channel ids work as-is; user DMs need an explicit InputPeerUser.
+    const peer: string | Api.InputPeerUser = groupId
+      ? String(groupId)
+      : await resolveUserPeer(
+          client,
+          String(userId),
+          accessHash ? String(accessHash) : undefined,
+        );
+
+    const messages = await client.getMessages(peer, { ids: [messageId] });
     const msg = messages[0];
 
     if (!msg || !msg.media) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import LinksModal, { type LinkEntry } from "./LinksModal";
 import ForwardModal, { type ForwardDestination } from "./ForwardModal";
 import AutoArchiveModal from "./AutoArchiveModal";
@@ -32,14 +32,48 @@ function describeForwardContent(
   return parts.join(" · ");
 }
 
-function buildDownloadUrl(session: string, groupId: string, messageId: number) {
+/** The peer descriptor needed by the download / media routes. When `isUser`
+ * is true the `groupId` slot actually holds the user's id and the
+ * `accessHash` lets the cold client resolve them. */
+interface PeerCtx {
+  groupId: string;
+  isUser?: boolean;
+  accessHash?: string;
+}
+
+/** Module-scoped context so AlbumPreviewLayer / AlbumBadge can pick up the
+ * peer descriptor without prop-drilling — the main GroupMedia component sets
+ * it once and all descendants use the same form. */
+const GroupMediaPeerContext = createContext<PeerCtx>({ groupId: "" });
+
+function buildDownloadUrl(
+  session: string,
+  peer: PeerCtx,
+  messageId: number,
+) {
   const params = new URLSearchParams({
     sessionString: session,
-    groupId,
     messageId: String(messageId),
     download: "1",
   });
+  if (peer.isUser) {
+    params.set("userId", peer.groupId);
+    if (peer.accessHash) params.set("accessHash", peer.accessHash);
+  } else {
+    params.set("groupId", peer.groupId);
+  }
   return `/api/telegram/download?${params.toString()}`;
+}
+
+/** Body fragment to merge into POSTs that target either a group/channel or a
+ * user DM. Mirrors the routes' { groupId } vs { userId, accessHash } shape. */
+function peerBody(
+  peer: PeerCtx,
+): { groupId: string } | { userId: string; accessHash?: string } {
+  if (peer.isUser) {
+    return { userId: peer.groupId, accessHash: peer.accessHash };
+  }
+  return { groupId: peer.groupId };
 }
 
 export interface Sender {
@@ -80,8 +114,13 @@ export interface MediaCacheEntry {
 
 interface GroupMediaProps {
   session: string;
+  /** Marked group/channel id, OR the user's id when `isUser` is true. */
   groupId: string;
   groupTitle: string;
+  /** Set when this view is rendering a user DM's media instead of a group's;
+   * the API calls and download URLs switch to userId/accessHash form. */
+  isUser?: boolean;
+  accessHash?: string;
   /** Opens this group/channel as a full message-stream chat view. */
   onViewChat?: () => void;
   /**
@@ -245,6 +284,7 @@ function AlbumPreviewLayer({
   groupId: string;
   className: string;
 }) {
+  const peer = useContext(GroupMediaPeerContext);
   return (
     <div
       className={`pointer-events-none absolute z-0 overflow-hidden rounded-t-xl border border-black/35 bg-transparent shadow-sm dark:border-white/25 ${className}`}
@@ -261,6 +301,8 @@ function AlbumPreviewLayer({
           <Thumbnail
             session={session}
             groupId={groupId}
+            isUser={peer.isUser}
+            accessHash={peer.accessHash}
             messageId={item.id}
             alt={item.caption || item.fileName}
             fallbackSrc={
@@ -535,12 +577,17 @@ export default function GroupMedia({
   session,
   groupId,
   groupTitle,
+  isUser = false,
+  accessHash,
   onViewChat,
   mediaCache,
   onCacheUpdate,
   destinationChats = [],
   onLeave,
 }: GroupMediaProps) {
+  // One peer descriptor passed to every API/URL helper so user DMs and groups
+  // go through the same code paths.
+  const peerCtx: PeerCtx = { groupId, isUser, accessHash };
   // tab's declared further down but needed for the initial cache lookup — read
   // straight from storage here so the first render already has the right data
   // when the cache is warm for that tab.
@@ -788,7 +835,7 @@ export default function GroupMedia({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             sessionString: session,
-            groupId,
+            ...peerBody(peerCtx),
             limit: 50,
             offsetId: currentOffset,
             filter: fetchFilter,
@@ -1022,7 +1069,7 @@ export default function GroupMedia({
       fileName: item.fileName,
       caption: item.caption,
       type: item.type,
-      url: `${origin}${buildDownloadUrl(session, groupId, item.id)}`,
+      url: `${origin}${buildDownloadUrl(session, peerCtx, item.id)}`,
     }));
   }
 
@@ -1080,7 +1127,7 @@ export default function GroupMedia({
     if (selectedItems.length === 1) {
       const item = selectedItems[0];
       const a = document.createElement("a");
-      a.href = buildDownloadUrl(session, groupId, item.id);
+      a.href = buildDownloadUrl(session, peerCtx, item.id);
       a.download = downloadFileName(item);
       document.body.appendChild(a);
       a.click();
@@ -1347,6 +1394,8 @@ export default function GroupMedia({
                 <Thumbnail
                   session={session}
                   groupId={groupId}
+                  isUser={isUser}
+                  accessHash={accessHash}
                   messageId={item.id}
                   alt={item.caption || item.fileName}
                   className="h-full w-full transition-transform group-hover:scale-105"
@@ -1367,7 +1416,7 @@ export default function GroupMedia({
                 )}
                 {!selectionMode && (
                   <a
-                    href={buildDownloadUrl(session, groupId, item.id)}
+                    href={buildDownloadUrl(session, peerCtx, item.id)}
                     download={downloadFileName(item)}
                     onClick={(e) => e.stopPropagation()}
                     className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity hover:bg-black/85 group-hover:opacity-100"
@@ -1455,6 +1504,7 @@ export default function GroupMedia({
   }
 
   return (
+    <GroupMediaPeerContext.Provider value={peerCtx}>
     <div className="flex h-full flex-col">
       {/* Tabs */}
       <div className="flex items-center gap-1 overflow-x-auto border-b border-zinc-200 px-3 sm:px-6 dark:border-zinc-800">
@@ -1744,6 +1794,8 @@ export default function GroupMedia({
                           <Thumbnail
                             session={session}
                             groupId={groupId}
+                            isUser={isUser}
+                            accessHash={accessHash}
                             messageId={item.id}
                             alt={item.caption}
                             className="h-full w-full transition-transform group-hover:scale-105"
@@ -1822,6 +1874,8 @@ export default function GroupMedia({
                           <Thumbnail
                             session={session}
                             groupId={groupId}
+                            isUser={isUser}
+                            accessHash={accessHash}
                             messageId={item.id}
                             alt={item.caption || item.fileName}
                             fallbackSrc={
@@ -1859,7 +1913,7 @@ export default function GroupMedia({
                           )}
                           {!item.album && !selectionMode && (
                             <a
-                              href={buildDownloadUrl(session, groupId, item.id)}
+                              href={buildDownloadUrl(session, peerCtx, item.id)}
                               download={downloadFileName(item)}
                               onClick={(e) => e.stopPropagation()}
                               className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/70 text-white opacity-0 transition-opacity hover:bg-black/85 group-hover:opacity-100"
@@ -2125,5 +2179,6 @@ export default function GroupMedia({
         </div>
       )}
     </div>
+    </GroupMediaPeerContext.Provider>
   );
 }

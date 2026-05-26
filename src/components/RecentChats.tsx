@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { LayoutGrid, List, ChevronLeft, ChevronRight, Search, X, ArrowLeft } from "lucide-react";
 import TelegramChat from "@/components/TelegramChat";
 import { useUnread } from "@/components/UnreadContext";
+import GroupMedia, { type MediaCacheEntry } from "@/components/GroupMedia";
 import type {
     ChatMedia,
     ForwardInfo,
@@ -72,6 +73,7 @@ type Contact = {
     /** Unread (unseen) incoming message count for this chat. */
     unreadCount?: number;
     photo?: string;
+    lastMessage?: string;
 };
 
 type ChatContact = {
@@ -176,6 +178,14 @@ export default function RecentChats({ sessionString }: { sessionString: string }
     const [selectedContact, setSelectedContact] = useState<ChatContact | null>(
         readStoredChat,
     );
+    // "chat" by default; flips to "media" when the user taps the shared-media
+    // button in the chat header. Renders GroupMedia configured for a user DM.
+    const [chatView, setChatView] = useState<"chat" | "media">("chat");
+    // Media tab cache scoped to this Recent Chats mount — kept simple since the
+    // user can re-fetch on demand.
+    const [userMediaCache, setUserMediaCache] = useState<
+        Record<string, MediaCacheEntry>
+    >({});
     const [messages, setMessages] = useState<ChatUiMessage[]>([]);
     const [messagesLoading, setMessagesLoading] = useState(false);
     const [hasMoreOlder, setHasMoreOlder] = useState(true);
@@ -354,6 +364,9 @@ export default function RecentChats({ sessionString }: { sessionString: string }
         setMessages([]);
         setHasMoreOlder(true);
         setLoadingOlder(false);
+        // Drop back to the chat sub-view so the next contact you open doesn't
+        // land on the previous one's shared-media tab.
+        setChatView("chat");
     }
 
     async function loadContacts(currentPage = 1, currentSearch = "") {
@@ -461,10 +474,13 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                     </span>
                 </div>
 
-                {/* Chat */}
+                {/* Chat / Media — both stay mounted (visibility-toggled) so
+                    switching back and forth keeps each one's scroll + state. */}
                 <div className="h-[calc(100%-61px)] flex justify-center">
-                    <div className="w-full h-full flex flex-col">
-                        <div className="flex-1 overflow-hidden">
+                    <div className="w-full h-full flex flex-col relative">
+                        <div
+                            className={`absolute inset-0 ${chatView === "chat" ? "" : "invisible"}`}
+                        >
                             <TelegramChat
                                 //@ts-ignore
                                 contact={selectedContact}
@@ -477,6 +493,26 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                 hasMoreOlder={hasMoreOlder}
                                 loadingOlder={loadingOlder}
                                 sessionString={sessionString}
+                                onViewMedia={() => setChatView("media")}
+                            />
+                        </div>
+                        <div
+                            className={`absolute inset-0 ${chatView === "media" ? "" : "invisible"}`}
+                        >
+                            <GroupMedia
+                                session={sessionString}
+                                groupId={selectedContact.id}
+                                groupTitle={`${selectedContact.firstName} ${selectedContact.lastName || ""}`.trim()}
+                                isUser
+                                accessHash={selectedContact.accessHash}
+                                onViewChat={() => setChatView("chat")}
+                                mediaCache={userMediaCache}
+                                onCacheUpdate={(key, entry) =>
+                                    setUserMediaCache((prev) => ({
+                                        ...prev,
+                                        [key]: entry,
+                                    }))
+                                }
                             />
                         </div>
                     </div>
@@ -572,6 +608,8 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                             // Prefer the live stream value; fall back to the
                             // initial fetch so the badge isn't blank during the
                             // brief window before the stream's first snapshot.
+                            const aa = contact?.phone === "85570375484"
+                            console.log("FKJDLKFJD",contact )
                             const liveUnread =
                                 unreadByChat[contact.id] ?? contact.unreadCount ?? 0;
                             return (
@@ -586,7 +624,8 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                             {name}
                                         </p>
                                         <p className="text-[11.5px] font-mono text-stone-400 dark:text-zinc-500 truncate mt-0.5">
-                                            {contact.username ? `@${contact.username}` : contact.phone}
+                                            {/* {contact.username ? `@${contact.username}` : contact.phone} */}
+                                            {contact.lastMessage ? contact.lastMessage : (contact.username ? `@${contact.username}` : contact.phone) }
                                         </p>
                                     </div>
                                     {liveUnread > 0 && (
@@ -627,7 +666,7 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                         {name}
                                     </p>
                                     <p className="text-[11px] font-mono text-stone-400 dark:text-zinc-500 truncate mt-1">
-                                        {contact.username ? `@${contact.username}` : contact.phone}
+                                        {contact.lastMessage ? contact.lastMessage : (contact.username ? `@${contact.username}` : contact.phone) }
                                     </p>
                                 </div>
                             );

@@ -2,10 +2,12 @@
 import { useEffect, useRef, useState } from "react";
 import { LayoutGrid, List, ChevronLeft, ChevronRight, Search, X, ArrowLeft } from "lucide-react";
 import TelegramChat from "./TelegramChat";
+import GroupMedia, { type MediaCacheEntry } from "./GroupMedia";
 import type {
     ChatMedia,
     ForwardInfo,
     LinkPreview,
+    TextEntity,
 } from "@/app/api/telegram/conversation/route";
 import type { ChatNavUser } from "./ChatNavContext";
 
@@ -66,6 +68,7 @@ type ChatUiMessage = {
     groupedId?: string;
     forwardedFrom?: ForwardInfo;
     linkPreview?: LinkPreview;
+    entities?: TextEntity[];
 };
 
 /** Raw message shape returned by /api/telegram/conversation. */
@@ -79,6 +82,7 @@ type ApiMessage = {
     groupedId?: string;
     forwardedFrom?: ForwardInfo;
     linkPreview?: LinkPreview;
+    entities?: TextEntity[];
 };
 
 function toUiMessage(m: ApiMessage): ChatUiMessage {
@@ -92,6 +96,7 @@ function toUiMessage(m: ApiMessage): ChatUiMessage {
         groupedId: m.groupedId,
         forwardedFrom: m.forwardedFrom,
         linkPreview: m.linkPreview,
+        entities: m.entities,
     };
 }
 
@@ -177,6 +182,14 @@ export default function MyContacts({
     const [selectedContact, setSelectedContact] = useState<ChatContact | null>(
         readStoredChat,
     );
+    // "chat" by default; flips to "media" when the user taps the shared-media
+    // button in the chat header.
+    const [chatView, setChatView] = useState<"chat" | "media">("chat");
+    // Local cache for GroupMedia rendered against a user DM — keeps the
+    // photo/video/file tabs warm while the user toggles between chat & media.
+    const [userMediaCache, setUserMediaCache] = useState<
+        Record<string, MediaCacheEntry>
+    >({});
     const [messages, setMessages] = useState<ChatUiMessage[]>([]);
     const [messagesLoading, setMessagesLoading] = useState(false);
     const [hasMoreOlder, setHasMoreOlder] = useState(true);
@@ -359,6 +372,9 @@ export default function MyContacts({
         setMessages([]);
         setHasMoreOlder(true);
         setLoadingOlder(false);
+        // New chat opens on the chat sub-view, not whichever tab the previous
+        // contact was last on.
+        setChatView("chat");
         void loadConversation(contact.id, contact.accessHash, true);
 
         // fetch full user details (online status, bio, etc.)
@@ -389,6 +405,7 @@ export default function MyContacts({
         setMessages([]);
         setHasMoreOlder(true);
         setLoadingOlder(false);
+        setChatView("chat");
     }
 
     // Open a conversation requested from outside (a t.me/<user> link or a
@@ -433,10 +450,24 @@ export default function MyContacts({
                     </span>
                 </div>
 
-                {/* Chat */}
+                {/* Chat / Media — both stay mounted (visibility-toggled) so
+                    switching back and forth keeps each one's scroll + state. */}
                 <div className="h-screen flex justify-center">
-                    <div className="w-full h-full flex flex-col">
-                        <div className="flex-1 overflow-hidden">
+                    <div className="w-full h-full flex flex-col relative">
+                        <div
+                            className={`absolute inset-0 ${chatView === "chat" ? "" : "invisible"}`}
+                             style={{
+                            backgroundImage: `
+        linear-gradient(
+            rgba(238,246,252,0.9),
+            rgba(238,246,252,0.9)
+        ),
+        url("/telegram-bg.png")
+    `,
+                            backgroundRepeat: "repeat",
+                            backgroundSize: "700px auto",
+                        }}
+                        >
                             <TelegramChat
                                 //@ts-ignore
                                 contact={selectedContact}
@@ -448,6 +479,26 @@ export default function MyContacts({
                                 hasMoreOlder={hasMoreOlder}
                                 loadingOlder={loadingOlder}
                                 sessionString={sessionString}
+                                onViewMedia={() => setChatView("media")}
+                            />
+                        </div>
+                        <div
+                            className={`absolute inset-0 ${chatView === "media" ? "" : "invisible"}`}
+                        >
+                            <GroupMedia
+                                session={sessionString}
+                                groupId={selectedContact.id}
+                                groupTitle={`${selectedContact.firstName} ${selectedContact.lastName || ""}`.trim()}
+                                isUser
+                                accessHash={selectedContact.accessHash}
+                                onViewChat={() => setChatView("chat")}
+                                mediaCache={userMediaCache}
+                                onCacheUpdate={(key, entry) =>
+                                    setUserMediaCache((prev) => ({
+                                        ...prev,
+                                        [key]: entry,
+                                    }))
+                                }
                             />
                         </div>
                     </div>

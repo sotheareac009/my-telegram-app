@@ -9,6 +9,7 @@ import type {
     ChatMedia,
     ForwardInfo,
     LinkPreview,
+    TextEntity,
 } from "@/app/api/telegram/conversation/route";
 
 /** Chat message shape consumed by <TelegramChat>. */
@@ -22,6 +23,7 @@ type ChatUiMessage = {
     groupedId?: string;
     forwardedFrom?: ForwardInfo;
     linkPreview?: LinkPreview;
+    entities?: TextEntity[];
 };
 
 /** Raw message shape returned by /api/telegram/conversation. */
@@ -35,6 +37,7 @@ type ApiMessage = {
     groupedId?: string;
     forwardedFrom?: ForwardInfo;
     linkPreview?: LinkPreview;
+    entities?: TextEntity[];
 };
 
 function toUiMessage(m: ApiMessage): ChatUiMessage {
@@ -48,6 +51,7 @@ function toUiMessage(m: ApiMessage): ChatUiMessage {
         groupedId: m.groupedId,
         forwardedFrom: m.forwardedFrom,
         linkPreview: m.linkPreview,
+        entities: m.entities,
     };
 }
 
@@ -405,6 +409,9 @@ export default function RecentChats({ sessionString }: { sessionString: string }
         setMessages([]);
         setHasMoreOlder(true);
         setLoadingOlder(false);
+        // New chat opens on the chat sub-view, not whichever tab the previous
+        // contact was last on.
+        setChatView("chat");
         void loadConversation(contact.id, contact.accessHash, true);
 
         // Mark the chat seen — clear its unread badge locally and server-side.
@@ -477,7 +484,19 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                 {/* Chat / Media — both stay mounted (visibility-toggled) so
                     switching back and forth keeps each one's scroll + state. */}
                 <div className="h-[calc(100%-61px)] flex justify-center">
-                    <div className="w-full h-full flex flex-col relative">
+                    <div className="w-full bg-amber-300 h-full flex flex-col relative"
+                        style={{
+                            backgroundImage: `
+        linear-gradient(
+            rgba(238,246,252,0.9),
+            rgba(238,246,252,0.9)
+        ),
+        url("/telegram-bg.png")
+    `,
+                            backgroundRepeat: "repeat",
+                            backgroundSize: "700px auto",
+                        }}
+                    >
                         <div
                             className={`absolute inset-0 ${chatView === "chat" ? "" : "invisible"}`}
                         >
@@ -608,8 +627,6 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                             // Prefer the live stream value; fall back to the
                             // initial fetch so the badge isn't blank during the
                             // brief window before the stream's first snapshot.
-                            const aa = contact?.phone === "85570375484"
-                            console.log("FKJDLKFJD",contact )
                             const liveUnread =
                                 unreadByChat[contact.id] ?? contact.unreadCount ?? 0;
                             return (
@@ -625,7 +642,7 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                         </p>
                                         <p className="text-[11.5px] font-mono text-stone-400 dark:text-zinc-500 truncate mt-0.5">
                                             {/* {contact.username ? `@${contact.username}` : contact.phone} */}
-                                            {contact.lastMessage ? contact.lastMessage : (contact.username ? `@${contact.username}` : contact.phone) }
+                                            {contact.lastMessage ? contact.lastMessage : (contact.username ? `@${contact.username}` : contact.phone)}
                                         </p>
                                     </div>
                                     {liveUnread > 0 && (
@@ -666,7 +683,7 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                         {name}
                                     </p>
                                     <p className="text-[11px] font-mono text-stone-400 dark:text-zinc-500 truncate mt-1">
-                                        {contact.lastMessage ? contact.lastMessage : (contact.username ? `@${contact.username}` : contact.phone) }
+                                        {contact.lastMessage ? contact.lastMessage : (contact.username ? `@${contact.username}` : contact.phone)}
                                     </p>
                                 </div>
                             );

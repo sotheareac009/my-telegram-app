@@ -1,25 +1,28 @@
 "use client";
 
-import { useCallback, useState, useRef, useEffect, useLayoutEffect } from "react";
+import { Fragment, useCallback, useState, useRef, useEffect, useLayoutEffect } from "react";
 import { useChatNav, telegramLinkTarget } from "./ChatNavContext";
 import { useForwardJobs } from "./ForwardJobsContext";
 import DialogAvatar from "./DialogAvatar";
 import type {
     ForwardInfo,
     LinkPreview,
+    TextEntity,
 } from "@/app/api/telegram/conversation/route";
+import { Copy, Check } from "lucide-react";
+import { EMOJI_CATEGORIES, gradients, SENDER_COLORS } from "@/constant";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface ChatMedia {
     kind:
-        | "photo"
-        | "video"
-        | "sticker"
-        | "gif"
-        | "voice"
-        | "audio"
-        | "file"
-        | "contact";
+    | "photo"
+    | "video"
+    | "sticker"
+    | "gif"
+    | "voice"
+    | "audio"
+    | "file"
+    | "contact";
     /** Inline low-res preview (base64 JPEG data URL). */
     thumb?: string;
     fileName?: string;
@@ -51,6 +54,8 @@ interface Message {
     forwardedFrom?: ForwardInfo;
     /** Telegram webpage/deep-link preview. */
     linkPreview?: LinkPreview;
+    /** Code / pre formatting spans from Telegram's message entities. */
+    entities?: TextEntity[];
 }
 
 /** A chat the user can forward messages to (from /api/telegram/dialogs). */
@@ -118,270 +123,9 @@ interface TelegramChatProps {
 }
 
 /** Per-sender label colour, deterministic from the sender id. */
-const SENDER_COLORS = [
-    "#e17076", "#7bc862", "#65aadd", "#a695e7",
-    "#ee7aae", "#6ec9cb", "#faa774", "#6a8cda",
-];
 
-const EMOJI_CATEGORIES = [
-    {
-        label: "Smileys",
-        icon: "😀",
-        emojis: [
-            "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣",
-            "🥲", "☺️", "😊", "😇", "🙂", "🙃", "😉", "😌",
-            "😍", "🥰", "😘", "😗", "😙", "😚", "😋", "😛",
-            "😝", "😜", "🤪", "🤨", "🧐", "🤓", "😎", "🥸",
-            "🤩", "🥳", "😏", "😒", "😞", "😔", "😟", "😕",
-            "🙁", "☹️", "😣", "😖", "😫", "😩", "🥺", "😢",
-            "😭", "😤", "😠", "😡", "🤬", "🤯", "😳", "🥵",
-            "🥶", "😱", "😨", "😰", "😥", "😓", "🤗", "🤔",
-            "🫣", "🤭", "🫢", "🫡", "🤫", "🫠", "🤥", "😶",
-            "🫥", "😐", "🫤", "😑", "😬", "🙄", "😯", "😦",
-            "😧", "😮", "😲", "🥱", "😴", "🤤", "😪", "😮‍💨",
-            "😵", "😵‍💫", "🤐", "🥴", "🤢", "🤮", "🤧", "😷",
-            "🤒", "🤕", "🤑", "🤠", "😈", "👿", "👻", "💀",
-            "☠️", "👽", "🤖", "💩", "😺", "😸", "😹", "😻",
-            "😼", "😽", "🙀", "😿", "😾",
-        ],
-    },
-    {
-        label: "Gestures",
-        icon: "👍",
-        emojis: [
-            "👋", "🤚", "🖐️", "✋", "🖖", "🫱", "🫲", "🫳",
-            "🫴", "👌", "🤌", "🤏", "✌️", "🤞", "🫰", "🤟",
-            "🤘", "🤙", "👈", "👉", "👆", "🖕", "👇", "☝️",
-            "👍", "👎", "✊", "👊", "🤛", "🤜", "👏", "🙌",
-            "🫶", "👐", "🤲", "🤝", "🙏", "✍️", "💅", "🤳",
-            "💪", "🦾", "🦿", "🦵", "🦶", "👂", "🦻", "👃",
-            "🧠", "🫀", "🫁", "🦷", "🦴", "👀", "👁️", "👅",
-            "👄", "🫦", "💋",
-        ],
-    },
-    {
-        label: "People",
-        icon: "🧑",
-        emojis: [
-            "👶", "🧒", "👦", "👧", "🧑", "👱", "👨", "🧔",
-            "👩", "🧓", "👴", "👵", "🙍", "🙎", "🙅", "🙆",
-            "💁", "🙋", "🧏", "🙇", "🤦", "🤷", "👮", "🕵️",
-            "💂", "🥷", "👷", "🫅", "🤴", "👸", "👳", "👲",
-            "🧕", "🤵", "👰", "🤰", "🫃", "🫄", "🤱", "👩‍🍼",
-            "👨‍🍼", "🧑‍🍼", "👼", "🎅", "🤶", "🧑‍🎄", "🦸", "🦹",
-            "🧙", "🧚", "🧛", "🧜", "🧝", "🧞", "🧟", "🧌",
-            "💆", "💇", "🚶", "🧍", "🧎", "🏃", "💃", "🕺",
-            "👯", "🧖", "🧗", "🤺", "🏇", "⛷️", "🏂", "🏌️",
-            "🏄", "🚣", "🏊", "⛹️", "🏋️", "🚴", "🚵", "🤸",
-            "🤼", "🤽", "🤾", "🤹", "🧘", "🛀", "🛌", "👭",
-            "👫", "👬", "💏", "💑", "👪", "🗣️", "👤", "👥",
-        ],
-    },
-    {
-        label: "Nature",
-        icon: "🌿",
-        emojis: [
-            "🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼",
-            "🐻‍❄️", "🐨", "🐯", "🦁", "🐮", "🐷", "🐸", "🐵",
-            "🙈", "🙉", "🙊", "🐒", "🐔", "🐧", "🐦", "🐤",
-            "🐣", "🐥", "🦆", "🦅", "🦉", "🦇", "🐺", "🐗",
-            "🐴", "🦄", "🐝", "🪱", "🐛", "🦋", "🐌", "🐞",
-            "🐜", "🪰", "🪲", "🪳", "🦟", "🦗", "🕷️", "🕸️",
-            "🦂", "🐢", "🐍", "🦎", "🦖", "🦕", "🐙", "🦑",
-            "🦐", "🦞", "🦀", "🐡", "🐠", "🐟", "🐬", "🐳",
-            "🐋", "🦈", "🦭", "🐊", "🐅", "🐆", "🦓", "🦍",
-            "🦧", "🦣", "🐘", "🦛", "🦏", "🐪", "🐫", "🦒",
-            "🦘", "🦬", "🐃", "🐂", "🐄", "🐎", "🐖", "🐏",
-            "🐑", "🦙", "🐐", "🦌", "🐕", "🐩", "🦮", "🐈",
-            "🐈‍⬛", "🪶", "🐓", "🦃", "🦤", "🦚", "🦜", "🦢",
-            "🦩", "🕊️", "🐇", "🦝", "🦨", "🦡", "🦫", "🦦",
-            "🦥", "🐁", "🐀", "🐿️", "🦔", "🐾", "🐉", "🐲",
-            "🌵", "🎄", "🌲", "🌳", "🌴", "🪵", "🌱", "🌿",
-            "☘️", "🍀", "🎍", "🪴", "🎋", "🍃", "🍂", "🍁",
-            "🍄", "🐚", "🪨", "🌾", "💐", "🌷", "🌹", "🥀",
-            "🌺", "🌸", "🌼", "🌻", "🌞", "🌝", "🌛", "🌜",
-            "🌚", "🌕", "🌖", "🌗", "🌘", "🌑", "🌒", "🌓",
-            "🌔", "🌙", "🌎", "🌍", "🌏", "🪐", "💫", "⭐",
-            "🌟", "✨", "⚡", "☄️", "💥", "🔥", "🌪️", "🌈",
-            "☀️", "🌤️", "⛅", "🌥️", "☁️", "🌦️", "🌧️", "⛈️",
-            "🌩️", "🌨️", "❄️", "☃️", "⛄", "🌬️", "💨", "💧",
-            "💦", "☔", "☂️", "🌊", "🌫️",
-        ],
-    },
-    {
-        label: "Food",
-        icon: "🍕",
-        emojis: [
-            "🍏", "🍎", "🍐", "🍊", "🍋", "🍌", "🍉", "🍇",
-            "🍓", "🫐", "🍈", "🍒", "🍑", "🥭", "🍍", "🥥",
-            "🥝", "🍅", "🍆", "🥑", "🥦", "🥬", "🥒", "🌶️",
-            "🫑", "🌽", "🥕", "🫒", "🧄", "🧅", "🥔", "🍠",
-            "🥐", "🥯", "🍞", "🥖", "🥨", "🧀", "🥚", "🍳",
-            "🧈", "🥞", "🧇", "🥓", "🥩", "🍗", "🍖", "🦴",
-            "🌭", "🍔", "🍟", "🍕", "🫓", "🥪", "🥙", "🧆",
-            "🌮", "🌯", "🫔", "🥗", "🥘", "🫕", "🥫", "🍝",
-            "🍜", "🍲", "🍛", "🍣", "🍱", "🥟", "🦪", "🍤",
-            "🍙", "🍚", "🍘", "🍥", "🥠", "🥮", "🍢", "🍡",
-            "🍧", "🍨", "🍦", "🥧", "🧁", "🍰", "🎂", "🍮",
-            "🍭", "🍬", "🍫", "🍿", "🍩", "🍪", "🌰", "🥜",
-            "🍯", "🥛", "🍼", "☕", "🫖", "🍵", "🧃", "🥤",
-            "🧋", "🍶", "🍺", "🍻", "🥂", "🍷", "🥃", "🍸",
-            "🍹", "🧉", "🍾", "🧊", "🥄", "🍴", "🍽️", "🥣",
-            "🥡", "🥢", "🧂",
-        ],
-    },
-    {
-        label: "Travel",
-        icon: "🚀",
-        emojis: [
-            "🚗", "🚕", "🚙", "🚌", "🚎", "🏎️", "🚓", "🚑",
-            "🚒", "🚐", "🛻", "🚚", "🚛", "🚜", "🦯", "🦽",
-            "🦼", "🛴", "🚲", "🛵", "🏍️", "🛺", "🚨", "🚔",
-            "🚍", "🚘", "🚖", "🚡", "🚠", "🚟", "🚃", "🚋",
-            "🚞", "🚝", "🚄", "🚅", "🚈", "🚂", "🚆", "🚇",
-            "🚊", "🚉", "✈️", "🛫", "🛬", "🛩️", "💺", "🛰️",
-            "🚀", "🛸", "🚁", "🛶", "⛵", "🚤", "🛥️", "🛳️",
-            "⛴️", "🚢", "⚓", "🪝", "⛽", "🚧", "🚦", "🚥",
-            "🚏", "🗺️", "🗿", "🗽", "🗼", "🏰", "🏯", "🏟️",
-            "🎡", "🎢", "🎠", "⛲", "⛱️", "🏖️", "🏝️", "🏜️",
-            "🌋", "⛰️", "🏔️", "🗻", "🏕️", "⛺", "🛖", "🏠",
-            "🏡", "🏘️", "🏚️", "🏗️", "🏭", "🏢", "🏬", "🏣",
-            "🏤", "🏥", "🏦", "🏨", "🏪", "🏫", "🏩", "💒",
-            "🏛️", "⛪", "🕌", "🛕", "🕍", "⛩️", "🕋", "⛲",
-            "⛺", "🌁", "🌃", "🏙️", "🌄", "🌅", "🌆", "🌇",
-            "🌉", "♨️", "🎑", "🛤️", "🛣️",
-        ],
-    },
-    {
-        label: "Activities",
-        icon: "⚽",
-        emojis: [
-            "⚽", "🏀", "🏈", "⚾", "🥎", "🎾", "🏐", "🏉",
-            "🥏", "🎱", "🪀", "🏓", "🏸", "🏒", "🏑", "🥍",
-            "🏏", "🪃", "🥅", "⛳", "🪁", "🏹", "🎣", "🤿",
-            "🥊", "🥋", "🎽", "🛹", "🛼", "🛷", "⛸️", "🥌",
-            "🎿", "⛷️", "🏂", "🪂", "🏋️", "🤼", "🤸", "⛹️",
-            "🤺", "🤾", "🏌️", "🏇", "🧘", "🏄", "🏊", "🤽",
-            "🚣", "🧗", "🚵", "🚴", "🏆", "🥇", "🥈", "🥉",
-            "🏅", "🎖️", "🏵️", "🎗️", "🎫", "🎟️", "🎪", "🤹",
-            "🎭", "🩰", "🎨", "🎬", "🎤", "🎧", "🎼", "🎹",
-            "🥁", "🪘", "🎷", "🎺", "🪗", "🎸", "🪕", "🎻",
-            "🎲", "♟️", "🎯", "🎳", "🎮", "🎰", "🧩",
-        ],
-    },
-    {
-        label: "Objects",
-        icon: "💡",
-        emojis: [
-            "⌚", "📱", "📲", "💻", "⌨️", "🖥️", "🖨️", "🖱️",
-            "🖲️", "🕹️", "🗜️", "💽", "💾", "💿", "📀", "📼",
-            "📷", "📸", "📹", "🎥", "📽️", "🎞️", "📞", "☎️",
-            "📟", "📠", "📺", "📻", "🎙️", "🎚️", "🎛️", "🧭",
-            "⏱️", "⏲️", "⏰", "🕰️", "⌛", "⏳", "📡", "🔋",
-            "🪫", "🔌", "💡", "🔦", "🕯️", "🪔", "🧯", "🛢️",
-            "💸", "💵", "💴", "💶", "💷", "🪙", "💰", "💳",
-            "💎", "⚖️", "🪜", "🧰", "🪛", "🔧", "🔨", "⚒️",
-            "🛠️", "⛏️", "🪚", "🔩", "⚙️", "🪤", "🧱", "⛓️",
-            "🧲", "🔫", "💣", "🧨", "🪓", "🔪", "🗡️", "⚔️",
-            "🛡️", "🚬", "⚰️", "🪦", "⚱️", "🏺", "🔮", "📿",
-            "🧿", "💈", "⚗️", "🔭", "🔬", "🕳️", "🩹", "🩺",
-            "💊", "💉", "🩸", "🧬", "🦠", "🧫", "🧪", "🌡️",
-            "🧹", "🪠", "🧺", "🧻", "🚽", "🚰", "🚿", "🛁",
-            "🛀", "🧼", "🪥", "🪒", "🧽", "🪣", "🧴", "🛎️",
-            "🔑", "🗝️", "🚪", "🪑", "🛋️", "🛏️", "🛌", "🧸",
-            "🪆", "🖼️", "🪞", "🪟", "🛍️", "🛒", "🎁", "🎈",
-            "🎏", "🎀", "🪄", "🪅", "🎊", "🎉", "🎎", "🏮",
-            "🎐", "🧧", "✉️", "📩", "📨", "📧", "💌", "📥",
-            "📤", "📦", "🏷️", "🪧", "📪", "📫", "📬", "📭",
-            "📮", "📯", "📜", "📃", "📄", "📑", "🧾", "📊",
-            "📈", "📉", "🗒️", "🗓️", "📆", "📅", "🗑️", "📇",
-            "🗃️", "🗳️", "🗄️", "📋", "📁", "📂", "🗂️", "🗞️",
-            "📰", "📓", "📔", "📒", "📕", "📗", "📘", "📙",
-            "📚", "📖", "🔖", "🧷", "🔗", "📎", "🖇️", "📐",
-            "📏", "🧮", "📌", "📍", "✂️", "🖊️", "🖋️", "✒️",
-            "🖌️", "🖍️", "📝", "✏️", "🔍", "🔎", "🔏", "🔐",
-            "🔒", "🔓",
-        ],
-    },
-    {
-        label: "Symbols",
-        icon: "❤️",
-        emojis: [
-            "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍",
-            "🤎", "💔", "❤️‍🔥", "❤️‍🩹", "❣️", "💕", "💞", "💓",
-            "💗", "💖", "💘", "💝", "💟", "☮️", "✝️", "☪️",
-            "🕉️", "☸️", "✡️", "🔯", "🕎", "☯️", "☦️", "🛐",
-            "⛎", "♈", "♉", "♊", "♋", "♌", "♍", "♎",
-            "♏", "♐", "♑", "♒", "♓", "🆔", "⚛️", "🉑",
-            "☢️", "☣️", "📴", "📳", "🈶", "🈚", "🈸", "🈺",
-            "🈷️", "✴️", "🆚", "💮", "🉐", "㊙️", "㊗️", "🈴",
-            "🈵", "🈹", "🈲", "🅰️", "🅱️", "🆎", "🆑", "🅾️",
-            "🆘", "❌", "⭕", "🛑", "⛔", "📛", "🚫", "💯",
-            "💢", "♨️", "🚷", "🚯", "🚳", "🚱", "🔞", "📵",
-            "🚭", "❗", "❕", "❓", "❔", "‼️", "⁉️", "🔅",
-            "🔆", "〽️", "⚠️", "🚸", "🔱", "⚜️", "🔰", "♻️",
-            "✅", "🈯", "💹", "❇️", "✳️", "❎", "🌐", "💠",
-            "Ⓜ️", "🌀", "💤", "🏧", "🚾", "♿", "🅿️", "🛗",
-            "🈳", "🈂️", "🛂", "🛃", "🛄", "🛅", "🚹", "🚺",
-            "🚼", "⚧️", "🚻", "🚮", "🎦", "📶", "🈁", "🔣",
-            "ℹ️", "🔤", "🔡", "🔠", "🆖", "🆗", "🆙", "🆒",
-            "🆕", "🆓", "0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣",
-            "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟", "🔢", "#️⃣", "*️⃣",
-            "⏏️", "▶️", "⏸️", "⏯️", "⏹️", "⏺️", "⏭️", "⏮️",
-            "⏩", "⏪", "⏫", "⏬", "◀️", "🔼", "🔽", "➡️",
-            "⬅️", "⬆️", "⬇️", "↗️", "↘️", "↙️", "↖️", "↕️",
-            "↔️", "↪️", "↩️", "⤴️", "⤵️", "🔀", "🔁", "🔂",
-            "🔄", "🔃", "🎵", "🎶", "➕", "➖", "➗", "✖️",
-            "🟰", "♾️", "💲", "💱", "™️", "©️", "®️", "〰️",
-            "➰", "➿", "🔚", "🔙", "🔛", "🔝", "🔜", "✔️",
-            "☑️", "🔘", "🔴", "🟠", "🟡", "🟢", "🔵", "🟣",
-            "⚫", "⚪", "🟤", "🔺", "🔻", "🔸", "🔹", "🔶",
-            "🔷", "🔳", "🔲", "▪️", "▫️", "◾", "◽", "◼️",
-            "◻️", "🟥", "🟧", "🟨", "🟩", "🟦", "🟪", "⬛",
-            "⬜", "🟫",
-        ],
-    },
-    {
-        label: "Flags",
-        icon: "🏳️",
-        emojis: [
-            "🏁", "🚩", "🎌", "🏴", "🏳️", "🏳️‍🌈", "🏳️‍⚧️", "🏴‍☠️",
-            "🇦🇨", "🇦🇩", "🇦🇪", "🇦🇫", "🇦🇬", "🇦🇮", "🇦🇱", "🇦🇲",
-            "🇦🇴", "🇦🇶", "🇦🇷", "🇦🇸", "🇦🇹", "🇦🇺", "🇦🇼", "🇦🇽",
-            "🇦🇿", "🇧🇦", "🇧🇧", "🇧🇩", "🇧🇪", "🇧🇫", "🇧🇬", "🇧🇭",
-            "🇧🇮", "🇧🇯", "🇧🇱", "🇧🇲", "🇧🇳", "🇧🇴", "🇧🇶", "🇧🇷",
-            "🇧🇸", "🇧🇹", "🇧🇻", "🇧🇼", "🇧🇾", "🇧🇿", "🇨🇦", "🇨🇨",
-            "🇨🇩", "🇨🇫", "🇨🇬", "🇨🇭", "🇨🇮", "🇨🇰", "🇨🇱", "🇨🇲",
-            "🇨🇳", "🇨🇴", "🇨🇵", "🇨🇷", "🇨🇺", "🇨🇻", "🇨🇼", "🇨🇽",
-            "🇨🇾", "🇨🇿", "🇩🇪", "🇩🇬", "🇩🇯", "🇩🇰", "🇩🇲", "🇩🇴",
-            "🇩🇿", "🇪🇦", "🇪🇨", "🇪🇪", "🇪🇬", "🇪🇭", "🇪🇷", "🇪🇸",
-            "🇪🇹", "🇪🇺", "🇫🇮", "🇫🇯", "🇫🇰", "🇫🇲", "🇫🇴", "🇫🇷",
-            "🇬🇦", "🇬🇧", "🇬🇩", "🇬🇪", "🇬🇫", "🇬🇬", "🇬🇭", "🇬🇮",
-            "🇬🇱", "🇬🇲", "🇬🇳", "🇬🇵", "🇬🇶", "🇬🇷", "🇬🇸", "🇬🇹",
-            "🇬🇺", "🇬🇼", "🇬🇾", "🇭🇰", "🇭🇲", "🇭🇳", "🇭🇷", "🇭🇹",
-            "🇭🇺", "🇮🇨", "🇮🇩", "🇮🇪", "🇮🇱", "🇮🇲", "🇮🇳", "🇮🇴",
-            "🇮🇶", "🇮🇷", "🇮🇸", "🇮🇹", "🇯🇪", "🇯🇲", "🇯🇴", "🇯🇵",
-            "🇰🇪", "🇰🇬", "🇰🇭", "🇰🇮", "🇰🇲", "🇰🇳", "🇰🇵", "🇰🇷",
-            "🇰🇼", "🇰🇾", "🇰🇿", "🇱🇦", "🇱🇧", "🇱🇨", "🇱🇮", "🇱🇰",
-            "🇱🇷", "🇱🇸", "🇱🇹", "🇱🇺", "🇱🇻", "🇱🇾", "🇲🇦", "🇲🇨",
-            "🇲🇩", "🇲🇪", "🇲🇫", "🇲🇬", "🇲🇭", "🇲🇰", "🇲🇱", "🇲🇲",
-            "🇲🇳", "🇲🇴", "🇲🇵", "🇲🇶", "🇲🇷", "🇲🇸", "🇲🇹", "🇲🇺",
-            "🇲🇻", "🇲🇼", "🇲🇽", "🇲🇾", "🇲🇿", "🇳🇦", "🇳🇨", "🇳🇪",
-            "🇳🇫", "🇳🇬", "🇳🇮", "🇳🇱", "🇳🇴", "🇳🇵", "🇳🇷", "🇳🇺",
-            "🇳🇿", "🇴🇲", "🇵🇦", "🇵🇪", "🇵🇫", "🇵🇬", "🇵🇭", "🇵🇰",
-            "🇵🇱", "🇵🇲", "🇵🇳", "🇵🇷", "🇵🇸", "🇵🇹", "🇵🇼", "🇵🇾",
-            "🇶🇦", "🇷🇪", "🇷🇴", "🇷🇸", "🇷🇺", "🇷🇼", "🇸🇦", "🇸🇧",
-            "🇸🇨", "🇸🇩", "🇸🇪", "🇸🇬", "🇸🇭", "🇸🇮", "🇸🇯", "🇸🇰",
-            "🇸🇱", "🇸🇲", "🇸🇳", "🇸🇴", "🇸🇷", "🇸🇸", "🇸🇹", "🇸🇻",
-            "🇸🇽", "🇸🇾", "🇸🇿", "🇹🇦", "🇹🇨", "🇹🇩", "🇹🇫", "🇹🇬",
-            "🇹🇭", "🇹🇯", "🇹🇰", "🇹🇱", "🇹🇲", "🇹🇳", "🇹🇴", "🇹🇷",
-            "🇹🇹", "🇹🇻", "🇹🇼", "🇹🇿", "🇺🇦", "🇺🇬", "🇺🇲", "🇺🇳",
-            "🇺🇸", "🇺🇾", "🇺🇿", "🇻🇦", "🇻🇨", "🇻🇪", "🇻🇬", "🇻🇮",
-            "🇻🇳", "🇻🇺", "🇼🇫", "🇼🇸", "🇽🇰", "🇾🇪", "🇾🇹", "🇿🇦",
-            "🇿🇲", "🇿🇼",
-        ],
-    },
-];
+
+
 
 const RECENT_EMOJI_STORAGE_KEY = "telegram-chat-recent-emojis";
 const MAX_RECENT_EMOJIS = 48;
@@ -651,16 +395,7 @@ function mediaBox(
     return { width: Math.round(dw), height: Math.round(dh) };
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-const gradients = [
-    "from-[#FF6B6B] to-[#FF8E53]",
-    "from-[#4FACFE] to-[#00F2FE]",
-    "from-[#43E97B] to-[#38F9D7]",
-    "from-[#FA709A] to-[#FEE140]",
-    "from-[#A18CD1] to-[#FBC2EB]",
-    "from-[#FD746C] to-[#FF9068]",
-    "from-[#4481EB] to-[#04BEFE]",
-];
+
 
 function getGradient(id: string) {
     const idx = id?.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
@@ -979,15 +714,128 @@ function ContactCard({ media }: { media: ChatMedia }) {
     );
 }
 
-// ── Message text with clickable links ──────────────────────────────────────────
-function MessageText({ text }: { text: string }) {
-    const nav = useChatNav();
-    if (!text) return null;
 
+
+function CodeBlock({
+    code,
+    language,
+}: {
+    code: string;
+    language?: string;
+}) {
+    const [copied, setCopied] = useState(false);
+
+    async function handleCopy() {
+        try {
+            await navigator.clipboard.writeText(code);
+
+            setCopied(true);
+
+            setTimeout(() => {
+                setCopied(false);
+            }, 2000);
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    return (
+        <div
+            className="
+                my-3 overflow-hidden
+                rounded-xl
+                border border-zinc-200 dark:border-zinc-800
+                bg-white dark:bg-zinc-900
+                shadow-sm
+            "
+        >
+            {/* Header */}
+            <div
+                className="
+                    flex items-center justify-between
+                    border-b border-zinc-200 dark:border-zinc-800
+                    bg-zinc-50 dark:bg-zinc-950
+                    px-3 py-2
+                "
+            >
+                <div className="flex items-center gap-2">
+                    <div className="flex gap-1">
+                        <span className="h-2 w-2 rounded-full bg-red-400" />
+                        <span className="h-2 w-2 rounded-full bg-yellow-400" />
+                        <span className="h-2 w-2 rounded-full bg-green-400" />
+                    </div>
+
+                    {language && (
+                        <span
+                            className="
+                                rounded-md
+                                bg-zinc-200 dark:bg-zinc-800
+                                px-2 py-0.5
+                                text-[10px]
+                                font-medium uppercase
+                                tracking-wider
+                                text-zinc-600 dark:text-zinc-300
+                            "
+                        >
+                            {language}
+                        </span>
+                    )}
+                </div>
+
+                <button
+                    onClick={handleCopy}
+                    className="
+                        flex items-center gap-1.5
+                        rounded-md
+                        px-2 py-1
+                        text-xs
+                        text-zinc-500
+                        transition
+                        hover:bg-zinc-200/60
+                        dark:hover:bg-zinc-800
+                    "
+                >
+                    {copied ? (
+                        <>
+                            <Check size={14} />
+                            Copied
+                        </>
+                    ) : (
+                        <>
+                            <Copy size={14} />
+                            Copy
+                        </>
+                    )}
+                </button>
+            </div>
+
+            {/* Body */}
+            <pre
+                className="
+                    overflow-x-auto
+                    p-4
+                    font-mono
+                    text-[13px]
+                    leading-6
+                    text-zinc-800 dark:text-zinc-100
+                    bg-zinc-50/50 dark:bg-zinc-950/40
+                "
+            >
+                <code>{code}</code>
+            </pre>
+        </div>
+    );
+}
+
+// ── Message text with clickable links + code formatting ───────────────────────
+/** Render a stretch of plain (non-code) message text — detecting links,
+ * t.me URLs, and @username mentions just like the original implementation. */
+function renderPlainSpan(
+    text: string,
+    keyBase: string,
+    nav: ReturnType<typeof useChatNav>,
+): React.ReactNode[] {
     // Fresh regex per call — a /g regex carries mutable lastIndex state.
-    // The `@username` branch matches Telegram's 5–32 char rule (letter, then
-    // letters/digits/underscores). A lookbehind for non-word chars stops us
-    // from matching the middle of an email or another token.
     const linkRe =
         /(https?:\/\/[^\s<]+|t\.me\/[^\s<]+|www\.[^\s<]+|(?<![\w@])@[a-zA-Z][a-zA-Z0-9_]{3,31})/g;
     const out: React.ReactNode[] = [];
@@ -997,18 +845,15 @@ function MessageText({ text }: { text: string }) {
     while ((m = linkRe.exec(text)) !== null) {
         if (m.index > last) out.push(text.slice(last, m.index));
         const raw = m[0];
-        // Trailing sentence punctuation isn't part of the URL/mention.
         const clean = raw.replace(/[.,!?;:)]+$/, "");
         const trailing = raw.slice(clean.length);
         const isMention = clean.startsWith("@");
         const tgTarget = isMention ? null : telegramLinkTarget(clean);
         if (isMention && nav) {
-            // Username mention — open the user's chat via the same resolver
-            // path as a t.me link.
             const username = clean.slice(1);
             out.push(
                 <button
-                    key={key++}
+                    key={`${keyBase}-${key++}`}
                     type="button"
                     onClick={() =>
                         nav.openTelegramLink(`https://t.me/${username}`)
@@ -1019,11 +864,9 @@ function MessageText({ text }: { text: string }) {
                 </button>,
             );
         } else if (tgTarget && nav) {
-            // Telegram link (public username or private invite) — resolve and
-            // open inside the app.
             out.push(
                 <button
-                    key={key++}
+                    key={`${keyBase}-${key++}`}
                     type="button"
                     onClick={() => nav.openTelegramLink(clean)}
                     className="cursor-pointer break-all text-[#3390ec] underline hover:no-underline"
@@ -1032,14 +875,12 @@ function MessageText({ text }: { text: string }) {
                 </button>,
             );
         } else if (isMention) {
-            // No nav context (shouldn't really happen inside a chat bubble) —
-            // fall through as plain text so we don't show a broken button.
             out.push(clean);
         } else {
             const href = clean.startsWith("http") ? clean : `https://${clean}`;
             out.push(
                 <a
-                    key={key++}
+                    key={`${keyBase}-${key++}`}
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -1053,6 +894,107 @@ function MessageText({ text }: { text: string }) {
         last = m.index + raw.length;
     }
     if (last < text.length) out.push(text.slice(last));
+    return out;
+}
+
+function MessageText({
+    text,
+    entities,
+}: {
+    text: string;
+    entities?: TextEntity[];
+}) {
+    const nav = useChatNav();
+
+    if (!text) return null;
+
+    if (!entities || entities.length === 0) {
+        return <>{renderPlainSpan(text, "t", nav)}</>;
+    }
+
+    const sorted = [...entities].sort(
+        (a, b) => a.offset - b.offset,
+    );
+
+    const out: React.ReactNode[] = [];
+
+    let cursor = 0;
+    let i = 0;
+
+    for (const e of sorted) {
+        const start = Math.max(e.offset, cursor);
+        const end = Math.min(
+            e.offset + e.length,
+            text.length,
+        );
+
+        if (start >= end) continue;
+
+        if (start > cursor) {
+            out.push(
+                <Fragment key={`p${i}`}>
+                    {renderPlainSpan(
+                        text.slice(cursor, start),
+                        `p${i}`,
+                        nav,
+                    )}
+                </Fragment>,
+            );
+
+            i++;
+        }
+
+        const slice = text.slice(start, end);
+
+        if (e.kind === "code") {
+            // Inline code
+            out.push(
+                <code
+                    key={`c${i}`}
+                    className="
+                        inline-flex items-center
+                        rounded-md
+                        border border-zinc-200
+                        dark:border-zinc-700
+                        bg-zinc-100/80
+                        dark:bg-zinc-800/80
+                        px-1.5 py-0.5
+                        font-mono text-[12px]
+                        text-zinc-800
+                        dark:text-zinc-100
+                        shadow-sm
+                    "
+                >
+                    {slice}
+                </code>,
+            );
+        } else {
+            // PRE block
+            out.push(
+                <CodeBlock
+                    key={`b${i}`}
+                    code={slice}
+                    language={e.language}
+                />,
+            );
+        }
+
+        i++;
+        cursor = end;
+    }
+
+    if (cursor < text.length) {
+        out.push(
+            <Fragment key={`p${i}`}>
+                {renderPlainSpan(
+                    text.slice(cursor),
+                    `p${i}`,
+                    nav,
+                )}
+            </Fragment>,
+        );
+    }
+
     return <>{out}</>;
 }
 
@@ -1262,9 +1204,8 @@ function ForwardLabel({
 
     return (
         <span
-            className={`mb-[0.5rem] flex items-center gap-1 text-[12px] leading-snug ${
-                padded ? "px-2 pt-1" : ""
-            }`}
+            className={`mb-[0.5rem] flex items-center gap-1 text-[12px] leading-snug ${padded ? "px-2 pt-1" : ""
+                }`}
         >
             <span className="shrink-0 text-[#8a9aaa] dark:text-zinc-400">Forwarded from</span>
             {canOpen ? (
@@ -1311,7 +1252,9 @@ function AlbumBubble({
 }) {
     const fromMe = messages[0].fromMe;
     const last = messages[messages.length - 1];
-    const caption = messages.find((m) => m.text)?.text || "";
+    const captionMsg = messages.find((m) => m.text);
+    const caption = captionMsg?.text || "";
+    const captionEntities = captionMsg?.entities;
     const cells = messages.filter((m) => m.media);
     const viewerItems: ViewerItem[] = cells
         .filter((m) => isViewable(m.media?.kind))
@@ -1329,11 +1272,10 @@ function AlbumBubble({
         <div className={`flex ${fromMe ? "justify-end" : "justify-start"} mb-1`}>
             <div
                 {...actionHandlers}
-                className={`relative max-w-[280px] overflow-hidden rounded-2xl p-1 text-sm shadow-sm ${
-                    fromMe
-                        ? "bg-[#effdde] dark:bg-[#2b5278] rounded-br-sm"
-                        : "bg-white dark:bg-zinc-900 rounded-bl-sm"
-                }`}
+                className={`relative max-w-[280px] overflow-hidden rounded-2xl p-1 text-sm shadow-sm ${fromMe
+                    ? "bg-[#effdde] dark:bg-[#2b5278] rounded-br-sm"
+                    : "bg-white dark:bg-zinc-900 rounded-bl-sm"
+                    }`}
             >
                 {isGroup && !fromMe && (
                     <span className="px-1 pt-0.5">
@@ -1388,7 +1330,7 @@ function AlbumBubble({
                 </div>
                 {caption && (
                     <span className="mt-1 block whitespace-pre-wrap px-2 pb-0.5" style={{ wordBreak: "break-word" }}>
-                        <MessageText text={caption} />
+                        <MessageText text={caption} entities={captionEntities} />
                     </span>
                 )}
                 <span className="block px-2 pb-1 text-right text-[10px] leading-none text-[#aab8c2] dark:text-zinc-500 select-none">
@@ -1509,11 +1451,10 @@ function Bubble({
                 )}
                 {msg?.text && (
                     <span
-                        className={`whitespace-pre-wrap ${
-                            isVisualMedia ? "mt-1 block px-2 pb-1" : ""
-                        }`}
+                        className={`whitespace-pre-wrap ${isVisualMedia ? "mt-1 block px-2 pb-1" : ""
+                            }`}
                     >
-                        <MessageText text={msg?.text} />
+                        <MessageText text={msg?.text} entities={msg?.entities} />
                     </span>
                 )}
                 {msg?.linkPreview && (
@@ -1799,12 +1740,12 @@ function UploadingTile({
     // Album tiles: square, matching AlbumBubble.
     const tileStyle: React.CSSProperties = single
         ? {
-              width: "100%",
-              aspectRatio:
-                  item.width && item.height
-                      ? `${item.width} / ${item.height}`
-                      : "16 / 9",
-          }
+            width: "100%",
+            aspectRatio:
+                item.width && item.height
+                    ? `${item.width} / ${item.height}`
+                    : "16 / 9",
+        }
         : { width: "100%", aspectRatio: "1 / 1" };
     return (
         <div
@@ -1991,16 +1932,16 @@ function FilePreview({
                 </span>
             )}
             {typeof progress !== "number" && (
-            <button
-                type="button"
-                onClick={onRemove}
-                className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80"
-                aria-label="Remove"
-            >
-                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
-                    <path d="M18 6 6 18M6 6l12 12" />
-                </svg>
-            </button>
+                <button
+                    type="button"
+                    onClick={onRemove}
+                    className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/60 text-white transition-colors hover:bg-black/80"
+                    aria-label="Remove"
+                >
+                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                        <path d="M18 6 6 18M6 6l12 12" />
+                    </svg>
+                </button>
             )}
         </div>
     );
@@ -2139,9 +2080,8 @@ export default function TelegramChat({
             destinationTitle: dest.title,
             destinationIsChannel: dest.isChannel,
             messageIds,
-            contentSummary: `${messageIds.length} message${
-                messageIds.length === 1 ? "" : "s"
-            }`,
+            contentSummary: `${messageIds.length} message${messageIds.length === 1 ? "" : "s"
+                }`,
         });
         setForwardingTo(null);
         if (jobId) {
@@ -2586,13 +2526,13 @@ export default function TelegramChat({
     const emojiCategories =
         recentEmojis.length > 0
             ? [
-                  {
-                      label: "Recent",
-                      icon: "🕘",
-                      emojis: recentEmojis,
-                  },
-                  ...EMOJI_CATEGORIES,
-              ]
+                {
+                    label: "Recent",
+                    icon: "🕘",
+                    emojis: recentEmojis,
+                },
+                ...EMOJI_CATEGORIES,
+            ]
             : EMOJI_CATEGORIES;
     const activeEmojiCategory =
         emojiCategories[emojiCategory] ?? emojiCategories[0];
@@ -2671,23 +2611,33 @@ export default function TelegramChat({
             <div
                 ref={scrollRef}
                 onScroll={handleScroll}
-                className="flex-1 overflow-y-auto px-4 py-2 w-full max-w-[550px] mx-auto border-r border-l border-gray-200 dark:border-zinc-800"
-                style={{
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%234a90d9' fill-opacity='0.06'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,
-                }}
+                className="flex-1 overflow-y-auto px-4 py-2 w-full max-w-[600px] mx-auto  dark:border-zinc-800"
+    //             style={{
+    //                 backgroundImage: `
+    //     linear-gradient(
+    //         rgba(238,246,252,0.9),
+    //         rgba(238,246,252,0.9)
+    //     ),
+    //     url("/telegram-bg.png")
+    // `,
+    //                 backgroundRepeat: "repeat",
+    //                 backgroundSize: "700px auto",
+    //             }}
             >
                 {isLoading ? (
                     <div className="flex justify-center items-center h-full">
                         <div className="w-8 h-8 border-2 border-[#3390ec] border-t-transparent rounded-full animate-spin" />
                     </div>
                 ) : messages.length === 0 ? (
-                    <div className="flex flex-col justify-center items-center h-full gap-3 select-none">
-                        <div className="w-16 h-16 rounded-full bg-white dark:bg-zinc-900 shadow flex items-center justify-center">
+                    <div className="flex flex-col justify-center items-center h-full gap-3 select-none ">
+                        <div className="bg-white p-[1rem] rounded-2xl flex flex-col justify-center items-center ">
+                            <div className="w-16 h-16 rounded-full bg-white dark:bg-zinc-900 shadow flex items-center justify-center ">
                             <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
                                 <path d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" stroke="#aab8c2" strokeWidth="1.5" strokeLinecap="round" />
                             </svg>
                         </div>
                         <p className="text-[#aab8c2] dark:text-zinc-500 text-sm">No messages yet. Say hello!</p>
+                        </div>
                     </div>
                 ) : (
                     <>
@@ -2719,7 +2669,7 @@ export default function TelegramChat({
                                     ) : (
                                         <Bubble
                                             key={unit.id}
-                                            msg={ unit}
+                                            msg={unit}
                                             mediaUrl={mediaUrl}
                                             onOpenViewer={openViewer}
                                             isGroup={isGroup}
@@ -2757,10 +2707,10 @@ export default function TelegramChat({
                     onForward={
                         sessionString
                             ? (messageId) => {
-                                  setViewer(null);
-                                  setForwardIds([messageId]);
-                                  void loadDestinations();
-                              }
+                                setViewer(null);
+                                setForwardIds([messageId]);
+                                void loadDestinations();
+                            }
                             : undefined
                     }
                 />
@@ -2901,8 +2851,8 @@ export default function TelegramChat({
                                                         {dest.isChannel
                                                             ? "Channel"
                                                             : dest.isGroup
-                                                              ? "Group"
-                                                              : "Private chat"}
+                                                                ? "Group"
+                                                                : "Private chat"}
                                                     </span>
                                                 </span>
                                                 {forwardingTo === dest.id && (
@@ -2924,127 +2874,126 @@ export default function TelegramChat({
                     {banner}
                 </div>
             ) : readOnly ? null : (
-            /* ── Input Bar ── */
-            <div className="shrink-0 px-3 py-2 bg-white dark:bg-zinc-900 border-t border-gray-200 dark:border-zinc-800 w-full max-w-[550px] mx-auto rounded-2xl">
-                <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    onChange={handleFilesPicked}
-                    className="hidden"
-                />
-                {/* Queued media — small chips while waiting to send. Once the
+                /* ── Input Bar ── */
+                <div className="shrink-0 px-3 py-2 bg-white dark:bg-zinc-900 border-t border-gray-200 dark:border-zinc-800 w-full max-w-[550px] mx-auto rounded-2xl">
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        onChange={handleFilesPicked}
+                        className="hidden"
+                    />
+                    {/* Queued media — small chips while waiting to send. Once the
                     send starts, the chips hide and the in-flight items render
                     as an outgoing bubble at the bottom of the chat instead. */}
-                {pendingFiles.length > 0 && !sendingMedia && (
-                    <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
-                        {pendingFiles.map((f, i) => (
-                            <FilePreview
-                                key={`${f.name}-${f.size}-${i}`}
-                                file={f}
-                                onRemove={() => removeFile(i)}
-                                progress={null}
-                            />
-                        ))}
-                    </div>
-                )}
-                <div className="flex items-end gap-2">
-                {/* emoji button */}
-                <div ref={emojiPickerRef} className="relative shrink-0">
-                    {showEmojiPicker && (
-                        <div className="absolute bottom-12 left-0 z-40 w-[320px] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
-                            <div className="flex gap-1 overflow-x-auto border-b border-gray-100 px-2 py-1.5 dark:border-zinc-800">
-                                {emojiCategories.map((category, index) => (
-                                    <button
-                                        key={category.label}
-                                        type="button"
-                                        onClick={() => setEmojiCategory(index)}
-                                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-lg transition-colors ${
-                                            emojiCategory === index
-                                                ? "bg-[#3390ec]/15"
-                                                : "hover:bg-[#3390ec]/10"
-                                        }`}
-                                        aria-label={category.label}
-                                        aria-pressed={emojiCategory === index}
-                                    >
-                                        {category.icon}
-                                    </button>
-                                ))}
-                            </div>
-                            <div className="grid max-h-72 grid-cols-8 gap-1 overflow-y-auto p-2">
-                                {activeEmojiCategory.emojis.map((emoji, index) => (
-                                    <button
-                                        key={`${emoji}-${index}`}
-                                        type="button"
-                                        onClick={() => insertEmoji(emoji)}
-                                        className="flex h-8 w-8 items-center justify-center rounded-lg text-lg transition-colors hover:bg-[#3390ec]/10"
-                                        aria-label={`Insert ${emoji}`}
-                                    >
-                                        {emoji}
-                                    </button>
-                                ))}
-                            </div>
+                    {pendingFiles.length > 0 && !sendingMedia && (
+                        <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
+                            {pendingFiles.map((f, i) => (
+                                <FilePreview
+                                    key={`${f.name}-${f.size}-${i}`}
+                                    file={f}
+                                    onRemove={() => removeFile(i)}
+                                    progress={null}
+                                />
+                            ))}
                         </div>
                     )}
-                    <button
-                        type="button"
-                        onClick={() => setShowEmojiPicker((open) => !open)}
-                        className="text-[#8a9aaa] dark:text-zinc-400 hover:text-[#3390ec] transition-colors p-2 rounded-full hover:bg-[#3390ec]/10 shrink-0 mb-0.5"
-                        aria-label="Choose emoji"
-                        aria-expanded={showEmojiPicker}
-                    >
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                            <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" />
-                            <path d="M8.5 14.5s1 1.5 3.5 1.5 3.5-1.5 3.5-1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-                            <circle cx="9" cy="10" r="1" fill="currentColor" />
-                            <circle cx="15" cy="10" r="1" fill="currentColor" />
-                        </svg>
-                    </button>
-                </div>
+                    <div className="flex items-end gap-2">
+                        {/* emoji button */}
+                        <div ref={emojiPickerRef} className="relative shrink-0">
+                            {showEmojiPicker && (
+                                <div className="absolute bottom-12 left-0 z-40 w-[320px] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+                                    <div className="flex gap-1 overflow-x-auto border-b border-gray-100 px-2 py-1.5 dark:border-zinc-800">
+                                        {emojiCategories.map((category, index) => (
+                                            <button
+                                                key={category.label}
+                                                type="button"
+                                                onClick={() => setEmojiCategory(index)}
+                                                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-lg transition-colors ${emojiCategory === index
+                                                    ? "bg-[#3390ec]/15"
+                                                    : "hover:bg-[#3390ec]/10"
+                                                    }`}
+                                                aria-label={category.label}
+                                                aria-pressed={emojiCategory === index}
+                                            >
+                                                {category.icon}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="grid max-h-72 grid-cols-8 gap-1 overflow-y-auto p-2">
+                                        {activeEmojiCategory.emojis.map((emoji, index) => (
+                                            <button
+                                                key={`${emoji}-${index}`}
+                                                type="button"
+                                                onClick={() => insertEmoji(emoji)}
+                                                className="flex h-8 w-8 items-center justify-center rounded-lg text-lg transition-colors hover:bg-[#3390ec]/10"
+                                                aria-label={`Insert ${emoji}`}
+                                            >
+                                                {emoji}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => setShowEmojiPicker((open) => !open)}
+                                className="text-[#8a9aaa] dark:text-zinc-400 hover:text-[#3390ec] transition-colors p-2 rounded-full hover:bg-[#3390ec]/10 shrink-0 mb-0.5"
+                                aria-label="Choose emoji"
+                                aria-expanded={showEmojiPicker}
+                            >
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                                    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" />
+                                    <path d="M8.5 14.5s1 1.5 3.5 1.5 3.5-1.5 3.5-1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                                    <circle cx="9" cy="10" r="1" fill="currentColor" />
+                                    <circle cx="15" cy="10" r="1" fill="currentColor" />
+                                </svg>
+                            </button>
+                        </div>
 
-                {/* textarea */}
-                <div className="flex-1 bg-[#f0f2f5] dark:bg-zinc-800 rounded-2xl px-3 py-2 flex items-end gap-2">
-                    <textarea
-                        ref={inputRef}
-                        rows={1}
-                        value={input}
-                        onChange={handleInput}
-                        onKeyDown={handleKeyDown}
-                        placeholder={
-                            pendingFiles.length > 0 ? "Add a caption…" : "Message"
-                        }
-                        className="flex-1 bg-transparent text-[#111] dark:text-zinc-100 placeholder-[#aab8c2] dark:placeholder-zinc-500 text-sm resize-none outline-none leading-relaxed max-h-[120px] overflow-y-auto"
-                        style={{ scrollbarWidth: "none" }}
-                    />
-                    {/* attach button */}
-                    {onMediaSent && (
+                        {/* textarea */}
+                        <div className="flex-1 bg-[#f0f2f5] dark:bg-zinc-800 rounded-2xl px-3 py-2 flex items-end gap-2">
+                            <textarea
+                                ref={inputRef}
+                                rows={1}
+                                value={input}
+                                onChange={handleInput}
+                                onKeyDown={handleKeyDown}
+                                placeholder={
+                                    pendingFiles.length > 0 ? "Add a caption…" : "Message"
+                                }
+                                className="flex-1 bg-transparent text-[#111] dark:text-zinc-100 placeholder-[#aab8c2] dark:placeholder-zinc-500 text-sm resize-none outline-none leading-relaxed max-h-[120px] overflow-y-auto"
+                                style={{ scrollbarWidth: "none" }}
+                            />
+                            {/* attach button */}
+                            {onMediaSent && (
+                                <button
+                                    type="button"
+                                    onClick={() => fileInputRef.current?.click()}
+                                    title="Attach photos, videos or files"
+                                    className="text-[#8a9aaa] dark:text-zinc-400 hover:text-[#3390ec] transition-colors shrink-0 mb-0.5"
+                                >
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                                        <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                    </svg>
+                                </button>
+                            )}
+                        </div>
+
+                        {/* send / mic button */}
                         <button
-                            type="button"
-                            onClick={() => fileInputRef.current?.click()}
-                            title="Attach photos, videos or files"
-                            className="text-[#8a9aaa] dark:text-zinc-400 hover:text-[#3390ec] transition-colors shrink-0 mb-0.5"
-                        >
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                            </svg>
-                        </button>
-                    )}
-                </div>
-
-                {/* send / mic button */}
-                <button
-                    onClick={handleSend}
-                    disabled={sendingMedia}
-                    className={`
+                            onClick={handleSend}
+                            disabled={sendingMedia}
+                            className={`
                         w-10 h-10 rounded-full flex items-center justify-center shrink-0 transition-all duration-200
                         ${input.trim() || pendingFiles.length > 0
-                            ? "bg-[#3390ec] text-white shadow-lg shadow-[#3390ec]/30 scale-100 hover:scale-105"
-                            : "bg-[#f0f2f5] dark:bg-zinc-800 text-[#8a9aaa] dark:text-zinc-400"
-                        }
+                                    ? "bg-[#3390ec] text-white shadow-lg shadow-[#3390ec]/30 scale-100 hover:scale-105"
+                                    : "bg-[#f0f2f5] dark:bg-zinc-800 text-[#8a9aaa] dark:text-zinc-400"
+                                }
                     `}
-                    aria-label="Send"
-                >
-                    {/* {sendingMedia ? (
+                            aria-label="Send"
+                        >
+                            {/* {sendingMedia ? (
                         <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
                     ) : input.trim() || pendingFiles.length > 0 ? (
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
@@ -3059,15 +3008,15 @@ export default function TelegramChat({
                             <line x1="8" y1="23" x2="16" y2="23" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                         </svg>
                     )} */}
-                    <div className="mt-0.5">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                            <path d="M22 2L11 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                            <path d="M22 2L15 22l-4-9-9-4 20-7z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
+                            <div className="mt-0.5">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                                    <path d="M22 2L11 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                    <path d="M22 2L15 22l-4-9-9-4 20-7z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                            </div>
+                        </button>
                     </div>
-                </button>
                 </div>
-            </div>
             )}
         </div>
     );

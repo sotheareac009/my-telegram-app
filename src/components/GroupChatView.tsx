@@ -6,6 +6,7 @@ import type {
   ChatMedia,
   ForwardInfo,
   LinkPreview,
+  TextEntity,
 } from "@/app/api/telegram/conversation/route";
 
 /** A resolved Telegram link the viewer should open. */
@@ -40,6 +41,7 @@ type ApiMessage = {
   senderName?: string;
   forwardedFrom?: ForwardInfo;
   linkPreview?: LinkPreview;
+  entities?: TextEntity[];
 };
 
 type UiMessage = {
@@ -54,6 +56,7 @@ type UiMessage = {
   senderName?: string;
   forwardedFrom?: ForwardInfo;
   linkPreview?: LinkPreview;
+  entities?: TextEntity[];
 };
 
 function toUi(m: ApiMessage): UiMessage {
@@ -69,6 +72,7 @@ function toUi(m: ApiMessage): UiMessage {
     senderName: m.senderName,
     forwardedFrom: m.forwardedFrom,
     linkPreview: m.linkPreview,
+    entities: m.entities,
   };
 }
 
@@ -110,6 +114,13 @@ export default function GroupChatView({
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
+  // Object URL for the chat's profile picture — fetched once per chatId and
+  // threaded down to TelegramChat so its header Avatar shows the real photo
+  // instead of the title-initial fallback.
+  const [photo, setPhoto] = useState<string | null>(null);
+  // True while the photo fetch is in flight — used together with `loading` to
+  // gate the chat render so the header doesn't pop in after the messages.
+  const [photoLoading, setPhotoLoading] = useState(true);
   // Discards in-flight fetches if the open chat changes (e.g. after joining).
   const activeRef = useRef<string | undefined>(chatId);
 
@@ -207,6 +218,47 @@ export default function GroupChatView({
     activeRef.current = chatId;
     void loadConversation(chatId, true);
   }, [chatId, loadConversation]);
+
+  // Fetch the chat's profile picture once per chatId. The API returns a JPEG
+  // blob; we wrap it in an object URL so the Avatar can render it. Cleaned up
+  // on unmount / chat switch so we don't leak the previous chat's blob.
+  useEffect(() => {
+    if (!chatId) return;
+    let cancelled = false;
+    let createdUrl: string | null = null;
+    const peerType: "channel" | "user" = isUser ? "user" : "channel";
+    setPhotoLoading(true);
+    void (async () => {
+      try {
+        const res = await fetch("/api/telegram/dialog-photo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionString,
+            groupId: chatId,
+            accessHash: target.accessHash,
+            peerType,
+          }),
+        });
+        if (!res.ok) return;
+        const blob = await res.blob();
+        if (cancelled) return;
+        createdUrl = URL.createObjectURL(blob);
+        setPhoto(createdUrl);
+      } catch {
+        // ignore — Avatar will fall back to the title initial
+      } finally {
+        // Whether the fetch succeeded or 404'd, the loading gate must lift so
+        // chats with no profile photo aren't stuck on the spinner.
+        if (!cancelled) setPhotoLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+      setPhoto(null);
+    };
+  }, [chatId, sessionString, isUser, target.accessHash]);
 
   // Poll for new messages every 5s.
   const pollRef = useRef<() => void>(() => {});
@@ -420,19 +472,47 @@ export default function GroupChatView({
   // ── Chat mode — render the message stream ──
   // Members get a live composer; non-members see the Join banner instead and
   // the stream stays read-only until they join.
+  // Hold the whole chat behind a spinner until BOTH the conversation and the
+  // profile photo finish loading — avoids the header avatar popping in after
+  // the message list is already up.
+  if (loading || photoLoading) {
+    return (
+      <div className="flex h-full items-center justify-center bg-gradient-to-b from-zinc-100 via-blue-50/40 to-zinc-100 dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-300 border-t-blue-500 dark:border-zinc-700 dark:border-t-blue-400" />
+          <span className="text-[12px] text-zinc-500 dark:text-zinc-400">
+            Loading {isChannel ? "channel" : isUser ? "chat" : "group"}…
+          </span>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="relative flex h-full justify-center overflow-hidden bg-gradient-to-b from-zinc-100 via-blue-50/40 to-zinc-100 dark:from-zinc-950 dark:via-zinc-900 dark:to-zinc-950">
       {/* Soft background glow behind the chat panel */}
       <div className="pointer-events-none absolute inset-0 -z-10">
         <div className="absolute -top-24 left-1/2 h-72 w-[640px] -translate-x-1/2 rounded-full bg-blue-300/20 blur-[120px] dark:bg-blue-500/10" />
       </div>
-      <div className="flex h-full w-full flex-col overflow-hidden shadow-xl shadow-blue-500/5 ring-1 ring-black/5 dark:shadow-black/30 dark:ring-white/5">
+      <div className="flex h-full w-full flex-col overflow-hidden shadow-xl shadow-blue-500/5 ring-1 ring-black/5 dark:shadow-black/30 dark:ring-white/5"
+       style={{
+                            backgroundImage: `
+        linear-gradient(
+            rgba(238,246,252,0.9),
+            rgba(238,246,252,0.9)
+        ),
+        url("/telegram-bg.png")
+    `,
+                            backgroundRepeat: "repeat",
+                            backgroundSize: "700px auto",
+                        }}
+      >
         <TelegramChat
           contact={{
             id: chatId,
             accessHash: isUser ? target.accessHash : undefined,
             firstName: target.title,
             lastSeen: isUser ? undefined : isChannel ? "Channel" : "Group",
+            photo,
           }}
           messages={messages}
           onSendMessage={handleSend}

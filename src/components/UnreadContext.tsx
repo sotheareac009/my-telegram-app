@@ -74,14 +74,36 @@ type StreamEvent =
   | ErrorEvent
   | { kind: "heartbeat" };
 
+/** Imperative handle so code outside the provider (e.g. Dashboard, which
+ * mounts the provider itself) can still call markRead optimistically. */
+export interface UnreadHandle {
+  markRead: (chatId: string) => void;
+}
+
 export function UnreadProvider({
   sessionString,
+  apiRef,
+  loadingFallback,
+  loadingTimeoutMs = 4000,
   children,
 }: {
   sessionString: string;
+  /** Optional ref the provider writes its imperative API into on mount. */
+  apiRef?: React.RefObject<UnreadHandle | null>;
+  /** Element rendered while the initial unread snapshot is loading. When
+   * omitted, children render immediately (legacy behaviour). */
+  loadingFallback?: React.ReactNode;
+  /** How long to wait for the initial snapshot before giving up and rendering
+   * the app anyway (without populated badges). Ignored when no loadingFallback
+   * is supplied. */
+  loadingTimeoutMs?: number;
   children: React.ReactNode;
 }) {
   const [state, setState] = useState<UnreadState>(ZERO);
+  // `ready` gates rendering of children when loadingFallback is supplied.
+  // Becomes true on the first snapshot event, on a stream error, or when the
+  // timeout fires — whichever happens first.
+  const [ready, setReady] = useState(!loadingFallback);
   // Keep the latest state in a ref so the streaming closure can apply deltas
   // without needing to re-subscribe on every change.
   const stateRef = useRef(state);
@@ -112,6 +134,16 @@ export function UnreadProvider({
     });
   }, []);
 
+  // Expose markRead through the imperative ref so a parent that itself
+  // renders this provider (e.g. Dashboard) can clear a bucket optimistically.
+  useEffect(() => {
+    if (!apiRef) return;
+    apiRef.current = { markRead };
+    return () => {
+      if (apiRef.current?.markRead === markRead) apiRef.current = null;
+    };
+  }, [apiRef, markRead]);
+
   useEffect(() => {
     if (!sessionString) {
       setState(ZERO);
@@ -139,6 +171,10 @@ export function UnreadProvider({
         } catch (err) {
           if (cancelled) return;
           if ((err as { name?: string }).name === "AbortError") return;
+          // Stream failed before we got a snapshot — unblock the UI anyway so
+          // the app isn't stuck on the spinner. Badges render as 0 until the
+          // retry succeeds.
+          setReady(true);
           // Network blip or server restart — back off then retry. Cap at 30 s
           // so a sleeping laptop doesn't take forever to recover on wake.
           await new Promise((resolve) => setTimeout(resolve, backoff));
@@ -179,6 +215,8 @@ export function UnreadProvider({
           channels: event.channels,
           perChat: { ...event.perChat },
         });
+        // First snapshot arrived — unblock the gated UI.
+        setReady(true);
       } else if (event.kind === "delta") {
         setState((prev) => {
           const cur = prev.perChat[event.chatId] ?? 0;
@@ -206,10 +244,24 @@ export function UnreadProvider({
     };
   }, [sessionString]);
 
+  // Safety net: if the snapshot never arrives (slow Telegram, dropped
+  // connection before first event, etc.), unblock the UI after the timeout
+  // so the app isn't held hostage by an unresponsive stream.
+  useEffect(() => {
+    if (!loadingFallback) return;
+    if (ready) return;
+    const timer = setTimeout(() => setReady(true), loadingTimeoutMs);
+    return () => clearTimeout(timer);
+  }, [loadingFallback, loadingTimeoutMs, ready]);
+
   const value = useMemo<UnreadContextValue>(
     () => ({ ...state, markRead }),
     [state, markRead],
   );
+
+  if (loadingFallback && !ready) {
+    return <>{loadingFallback}</>;
+  }
 
   return <UnreadCtx.Provider value={value}>{children}</UnreadCtx.Provider>;
 }

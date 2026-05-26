@@ -47,17 +47,54 @@ function parseRange(
  * and PhotoCachedSize (used differently). Returns undefined when no real size
  * exists.
  */
+/** Information needed to download the largest available variant of a photo —
+ * works for both regular PhotoSize and PhotoSizeProgressive. The latter is
+ * what Telegram deeplink (t.me/...) webpage previews tend to come back as.
+ * Holds the original Api size too so callers that prefer to pass it back to
+ * gramjs (e.g. downloadMedia) can do so directly. */
+interface DownloadableSize {
+  /** The original gramjs size object — pass-through for downloadMedia. */
+  raw: Api.PhotoSize | Api.PhotoSizeProgressive;
+  type: string;
+  width: number;
+  height: number;
+  /** Total byte length to allocate for the download. PhotoSizeProgressive
+   * ships the running offsets in a `sizes` array; the last entry is the
+   * full byte length. */
+  byteLen: number;
+}
+
 function pickBestPhotoSize(
   sizes: readonly Api.TypePhotoSize[],
-): Api.PhotoSize | undefined {
-  let best: Api.PhotoSize | undefined;
+): DownloadableSize | undefined {
+  let best: DownloadableSize | undefined;
   let bestArea = 0;
   for (const s of sizes) {
-    if (!(s instanceof Api.PhotoSize)) continue; // only plain named sizes
-    const area = s.w * s.h;
+    let info: DownloadableSize | null = null;
+    if (s instanceof Api.PhotoSize) {
+      info = {
+        raw: s,
+        type: s.type,
+        width: s.w,
+        height: s.h,
+        byteLen: s.size > 0 ? s.size : 0,
+      };
+    } else if (s instanceof Api.PhotoSizeProgressive) {
+      // Last offset = full image byte length.
+      const total = s.sizes.length > 0 ? s.sizes[s.sizes.length - 1] : 0;
+      info = {
+        raw: s,
+        type: s.type,
+        width: s.w,
+        height: s.h,
+        byteLen: total,
+      };
+    }
+    if (!info) continue;
+    const area = info.width * info.height;
     if (area > bestArea) {
       bestArea = area;
-      best = s;
+      best = info;
     }
   }
   return best;
@@ -108,7 +145,8 @@ async function streamThumbnail(
       fileReference: photo.fileReference,
       thumbSize: size.type,
     });
-    const fileSize = size.size > 0 ? bigInt(size.size) : bigInt(2 * 1024 * 1024);
+    const fileSize =
+      size.byteLen > 0 ? bigInt(size.byteLen) : bigInt(2 * 1024 * 1024);
 
     const chunks: Buffer[] = [];
     for await (const chunk of client.iterDownload({
@@ -144,7 +182,7 @@ async function streamThumbnail(
   if (!size) {
     return Response.json({ error: "No thumbnail" }, { status: 404 });
   }
-  const buf = await client.downloadMedia(msg.media, { thumb: size });
+  const buf = await client.downloadMedia(msg.media, { thumb: size.raw });
   if (!buf) {
     return Response.json({ error: "No thumbnail" }, { status: 404 });
   }

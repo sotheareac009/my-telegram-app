@@ -8,7 +8,7 @@ import {
   telegramLinkTarget,
   type ChatNavUser,
 } from "./ChatNavContext";
-import { UnreadProvider } from "./UnreadContext";
+import { UnreadProvider, type UnreadHandle } from "./UnreadContext";
 import GroupsGrid, {
   type ChatFolder,
   type Group,
@@ -362,8 +362,14 @@ export default function Dashboard({
     chatOpenRef.current = chatStack.length > 0;
   }, [chatStack]);
 
+  // Imperative handle the UnreadProvider writes into so we can clear a chat's
+  // bucket optimistically when the user opens it — Dashboard sits outside the
+  // provider and can't use the useUnread() hook directly.
+  const unreadApi = useRef<UnreadHandle | null>(null);
+
   const openChat = useCallback((target: GroupChatTarget) => {
     setChatStack((prev) => [...prev, target]);
+    if (target.id) unreadApi.current?.markRead(target.id);
   }, []);
   const closeTopChat = useCallback(() => {
     setChatStack((prev) => prev.slice(0, -1));
@@ -474,7 +480,9 @@ export default function Dashboard({
     // A group/channel opens in its chat by default.
     setGroupView("chat");
     // Viewing it counts as reading it — clear the unread badge in the list and
-    // mark the chat read on Telegram.
+    // mark the chat read on Telegram. Also clear the sidebar's bucket count
+    // optimistically so the badge updates without waiting for the SSE delta.
+    unreadApi.current?.markRead(group.id);
     const cached = groupsCache?.find((g) => g.id === group.id);
     if (cached && cached.unreadCount > 0) {
       setGroupsCache((prev) =>
@@ -555,7 +563,20 @@ export default function Dashboard({
 
   return (
     <ChatNavProvider value={chatNav}>
-      <UnreadProvider sessionString={session}>
+      <UnreadProvider
+        sessionString={session}
+        apiRef={unreadApi}
+        loadingFallback={
+          <div className="flex h-dvh items-center justify-center bg-zinc-50 dark:bg-zinc-950">
+            <div className="flex flex-col items-center gap-3">
+              <div className="h-7 w-7 animate-spin rounded-full border-2 border-zinc-300 border-t-blue-500 dark:border-zinc-700 dark:border-t-blue-400" />
+              <span className="text-[12px] text-zinc-500 dark:text-zinc-400">
+                Loading…
+              </span>
+            </div>
+          </div>
+        }
+      >
       <div className="flex h-dvh flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-950">
         <Header
           user={user}

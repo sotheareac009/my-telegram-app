@@ -43,3 +43,14 @@ body {
     transform: translateX(300%);
   }
 }
+
+/* iOS Safari auto-zooms any focused text input whose font-size is < 16px.
+   Tailwind's text-sm (14px) and text-xs (12px) both trip it, so floor the
+   font-size at 16px on phone-sized viewports — desktop styles are untouched. */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { LayoutGrid, List, ChevronLeft, ChevronRight, Search, X, ArrowLeft } from "lucide-react";
 import TelegramChat from "./TelegramChat";
 import GroupMedia, { type MediaCacheEntry } from "./GroupMedia";
+import { useUnread } from "./UnreadContext";
 import type {
     ChatMedia,
     ForwardInfo,
@@ -269,9 +270,19 @@ export default function MyContacts({
             });
             const data = await res.json();
             if (activeChatIdRef.current !== userId) return; // switched chats
-            if (Array.isArray(data.messages)) {
+            if (Array.isArray(data.messages) && data.messages.length > 0) {
                 const incoming = (data.messages as ApiMessage[]).map(toUiMessage);
                 setMessages((prev) => mergeMessages(prev, incoming));
+                // Feed the newest message into the shared lastByChat so the
+                // contacts list preview stays in sync even when the SSE
+                // stream skips deltas. Skip media-only messages whose text is
+                // empty so they don't blank out an existing preview.
+                const newest = data.messages[
+                    data.messages.length - 1
+                ] as ApiMessage;
+                if (newest.text) {
+                    noteLastMessage(userId, newest.text, newest.date);
+                }
             }
         } catch (err) {
             console.error(err);
@@ -283,6 +294,9 @@ export default function MyContacts({
     async function handleSendMessage(text: string) {
         const contact = selectedContact;
         if (!contact) return;
+        // Optimistic preview bump — Telegram doesn't echo own-sends back to
+        // this session, so the list won't update from the SSE stream alone.
+        noteLastMessage(contact.id, text);
         try {
             const res = await fetch("/api/telegram/send-message", {
                 method: "POST",
@@ -297,6 +311,9 @@ export default function MyContacts({
             const data = await res.json();
             if (data.message && activeChatIdRef.current === contact.id) {
                 setMessages((prev) => mergeMessages(prev, [toUiMessage(data.message)]));
+                if (typeof data.message.date === "number") {
+                    noteLastMessage(contact.id, text, data.message.date);
+                }
             }
         } catch (err) {
             console.error(err);
@@ -310,6 +327,35 @@ export default function MyContacts({
         if (!c || activeChatIdRef.current !== c.id) return;
         void loadConversation(c.id, c.accessHash, false);
     }
+
+    // Auto-mark-read while the chat is open: if a new incoming message arrives
+    // and bumps this chat's unread (via the SSE stream), immediately clear it
+    // both locally and on Telegram. Matches Telegram's own behaviour.
+    const { perChat: unreadByChat, markRead, noteLastMessage } = useUnread();
+    const activeContactId = selectedContact?.id;
+    const activeAccessHash = selectedContact?.accessHash;
+    const liveUnreadForActive = activeContactId
+        ? (unreadByChat[activeContactId] ?? 0)
+        : 0;
+    useEffect(() => {
+        if (!activeContactId || liveUnreadForActive <= 0) return;
+        markRead(activeContactId);
+        void fetch("/api/telegram/mark-read", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                sessionString,
+                userId: activeContactId,
+                accessHash: activeAccessHash,
+            }),
+        });
+    }, [
+        activeContactId,
+        liveUnreadForActive,
+        markRead,
+        sessionString,
+        activeAccessHash,
+    ]);
 
     // Live updates: poll the open conversation every 3s. The ref keeps the
     // interval stable while always calling the latest closure.

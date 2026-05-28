@@ -24,6 +24,8 @@ type PrivateChat = {
   unreadCount: number;
   /** Profile photo as a base64 JPEG data URL, when the user has one. */
   photo?: string;
+  /** Whether this dialog is pinned to the top of the chat list. */
+  pinMessage: boolean;
 };
 
 const DIALOG_FETCH_LIMIT = 200;
@@ -67,6 +69,7 @@ export async function POST(request: Request) {
           typeof lastMsg === "string" ? lastMsg.slice(0, 80) : "",
         date: d.date ?? 0,
         unreadCount: d.unreadCount ?? 0,
+        pinMessage: d.pinned ?? false,
       });
     }
 
@@ -92,6 +95,7 @@ export async function POST(request: Request) {
           lastMessage: typeof lastMsg === "string" ? lastMsg.slice(0, 80) : "",
           date: selfDialog?.date ?? 0,
           unreadCount: selfDialog?.unreadCount ?? 0,
+          pinMessage: selfDialog?.pinned ?? false,
         });
       }
     } catch {

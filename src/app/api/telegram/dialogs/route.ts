@@ -167,6 +167,7 @@ export async function POST(request: Request) {
           isUser: d.isUser ?? false,
           lastMessage: d.message?.message?.slice(0, 80) ?? "",
           date: d.message?.date ?? 0,
+          pinMessage: d.pinned ?? false,
           folderIds: [...folderMatches.entries()]
             .filter(([, ids]) => ids.has(id))
             .map(([folderId]) => folderId),
@@ -183,6 +184,7 @@ export async function POST(request: Request) {
           title: "Saved Messages",
           unreadCount: 0,
           isChannel: false,
+          pinMessage: false,
           isGroup: false,
           isUser: true,
           lastMessage: "",

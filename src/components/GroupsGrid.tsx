@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import DialogAvatar from "./DialogAvatar";
-import { LayoutGrid, List } from "lucide-react";
-import { group } from "console";
+import { LayoutGrid, List, Pin, PinOff } from "lucide-react";
+import { useUnread } from "./UnreadContext";
 
 export interface Group {
   id: string;
@@ -16,6 +16,7 @@ export interface Group {
   lastMessage: string;
   date: number;
   folderIds: string[];
+  pinMessage: boolean;
 }
 
 export interface GroupInfo {
@@ -73,9 +74,76 @@ export default function GroupsGrid({
   groups, folders, onGroupsLoaded, onFoldersLoaded, page, onPageChange,
 }: GroupsGridProps) {
   const loading = groups === null || folders === null;
+  // Live unread counts + last-message previews from the SSE stream — both
+  // override the static values from the initial /api/telegram/dialogs fetch
+  // so the badge and preview line stay in sync as messages arrive (and the
+  // badge clears the moment the user opens the chat).
+  const { perChat: unreadByChat, lastByChat } = useUnread();
   const [search, setSearch] = useState("");
   const perPage = 20;
   const [view, setView] = useState<"list" | "grid">("list");
+  const [loadingPinId, setLoadingPinId] = useState<string | null>(null);
+  // Toast for pin success/error (notably Telegram's 5-pin limit).
+  const [toast, setToast] = useState<
+    { kind: "success" | "error"; message: string } | null
+  >(null);
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  async function togglePin(group: Group) {
+    if (loadingPinId) return;
+    const nextPinned = !group.pinMessage;
+    setLoadingPinId(group.id);
+    try {
+      const res = await fetch("/api/telegram/pin-unpin-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionString: session,
+          chatId: Number(group.id),
+          pinned: nextPinned,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data?.code === "PINNED_DIALOGS_TOO_MUCH") {
+          setToast({
+            kind: "error",
+            message:
+              "Pin limit reached — Telegram allows up to 5 pinned chats. Unpin one to pin another.",
+          });
+        } else {
+          setToast({
+            kind: "error",
+            message: data?.error || "Failed to update pin.",
+          });
+        }
+        return;
+      }
+      const refresh = await fetch("/api/telegram/dialogs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionString: session }),
+      });
+      const refreshData = await refresh.json();
+      onGroupsLoaded(refreshData.groups ?? []);
+      onFoldersLoaded(refreshData.folders ?? []);
+      setToast({
+        kind: "success",
+        message: nextPinned ? "Chat pinned." : "Chat unpinned.",
+      });
+    } catch (err) {
+      setToast({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Failed to update pin.",
+      });
+    } finally {
+      setLoadingPinId(null);
+    }
+  }
 
   useEffect(() => {
     if (!session) return;
@@ -212,6 +280,10 @@ export default function GroupsGrid({
           {paginated.map((group, index) => {
             // const name = getName(group);
             const globalIndex = (currentPage - 1) * perPage + index;
+            const liveUnread =
+              unreadByChat[group.id] ?? group.unreadCount ?? 0;
+            const liveLast = lastByChat[group.id]?.text;
+            const previewText = liveLast || group.lastMessage;
             return (
               <div
                 key={group.id}
@@ -229,13 +301,38 @@ export default function GroupsGrid({
                     {group.title}
                   </p>
                   <p className="text-[11.5px] font-mono text-stone-400 dark:text-zinc-500 truncate mt-0.5">
-                    {group.lastMessage && (
+                    {previewText && (
                       <p className="mt-0.5 line-clamp-1 text-[11px] text-zinc-400">
-                        {group.lastMessage}
+                        {previewText}
                       </p>
                     )}
                   </p>
                 </div>
+                {liveUnread > 0 && (
+                  <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 px-1.5 text-[11px] font-semibold text-white shadow-sm">
+                    {liveUnread > 99 ? "99+" : liveUnread}
+                  </span>
+                )}
+                <button
+                  disabled={loadingPinId === group.id}
+                  onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                    e.stopPropagation();
+                    void togglePin(group);
+                  }}
+                  title={group?.pinMessage ? "Unpin message" : "Pin message"}
+                  className={`ml-2 relative flex items-center justify-center w-6 h-6 rounded-full cursor-pointer transition-all duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 ${loadingPinId === group.id ? "opacity-60 cursor-not-allowed" : ""} ${group?.pinMessage
+                    ? "bg-blue-500 text-white shadow-md shadow-blue-200 hover:bg-blue-600 focus-visible:ring-blue-400 hover:scale-110 hover:shadow-blue-300"
+                    : "bg-transparent text-slate-400 border border-slate-200 hover:border-blue-300 hover:text-blue-500 hover:bg-blue-50 focus-visible:ring-blue-300 hover:scale-110"
+                    } active:scale-95`}
+                >
+                  {loadingPinId === group.id ? (
+                    <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : group?.pinMessage ? (
+                    <PinOff size={11} strokeWidth={2.5} />
+                  ) : (
+                    <Pin size={11} strokeWidth={2.5} />
+                  )}
+                </button>
               </div>
             );
           })}
@@ -268,6 +365,10 @@ export default function GroupsGrid({
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 cursor-pointer">
               {paginated.map((group, index) => {
                 const globalIndex = (currentPage - 1) * perPage + index;
+                const liveUnread =
+                  unreadByChat[group.id] ?? group.unreadCount ?? 0;
+                const liveLast = lastByChat[group.id]?.text;
+                const previewText = liveLast || group.lastMessage;
                 return (
                   <button
                     key={group.id}
@@ -275,9 +376,9 @@ export default function GroupsGrid({
                     className="cursor-pointer group relative flex flex-col items-center gap-3 rounded-2xl border border-zinc-200/80 bg-white p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg hover:shadow-blue-500/8 dark:border-zinc-800/80 dark:bg-zinc-900 dark:hover:border-blue-800"
                   >
                     {/* Unread badge */}
-                    {group.unreadCount > 0 && (
+                    {liveUnread > 0 && (
                       <span className="absolute right-2.5 top-2.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-bold text-white shadow-sm">
-                        {group.unreadCount > 99 ? "99+" : group.unreadCount}
+                        {liveUnread > 99 ? "99+" : liveUnread}
                       </span>
                     )}
 
@@ -294,9 +395,9 @@ export default function GroupsGrid({
                       <p className="truncate text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">
                         {group.title}
                       </p>
-                      {group.lastMessage && (
+                      {previewText && (
                         <p className="mt-0.5 line-clamp-1 text-[11px] text-zinc-400">
-                          {group.lastMessage}
+                          {previewText}
                         </p>
                       )}
                     </div>
@@ -363,6 +464,20 @@ export default function GroupsGrid({
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6" /></svg>
           </button>
+        </div>
+      )}
+
+      {toast && (
+        <div className="pointer-events-none fixed inset-x-0 top-4 z-[60] flex justify-center px-4 sm:px-6">
+          <div
+            role="status"
+            className={`pointer-events-auto w-full max-w-sm rounded-2xl px-4 py-2.5 text-[13px] font-medium leading-snug shadow-lg text-center wrap-break-word ${toast.kind === "success"
+              ? "bg-emerald-600 text-white"
+              : "bg-red-600 text-white"
+              }`}
+          >
+            {toast.message}
+          </div>
         </div>
       )}
     </div>

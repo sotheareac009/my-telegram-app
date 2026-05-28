@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { LayoutGrid, List, ChevronLeft, ChevronRight, Search, X, ArrowLeft } from "lucide-react";
+import { LayoutGrid, List, ChevronLeft, ChevronRight, Search, X, ArrowLeft, Pin, PinOff } from "lucide-react";
 import TelegramChat from "@/components/TelegramChat";
 import { useUnread } from "@/components/UnreadContext";
 import GroupMedia, { type MediaCacheEntry } from "@/components/GroupMedia";
@@ -78,6 +78,8 @@ type Contact = {
     unreadCount?: number;
     photo?: string;
     lastMessage?: string;
+    /** Whether this dialog is pinned to the top of the chat list. */
+    pinMessage?: boolean;
 };
 
 type ChatContact = {
@@ -176,7 +178,12 @@ export default function RecentChats({ sessionString }: { sessionString: string }
     // contacts fetch still seeds `contact.unreadCount` so we render correctly
     // before the stream is connected; once it's connected, the per-chat value
     // here takes over so the badge updates in real time.
-    const { perChat: unreadByChat, markRead } = useUnread();
+    const {
+        perChat: unreadByChat,
+        lastByChat,
+        markRead,
+        noteLastMessage,
+    } = useUnread();
 
     // ── Chat state ──
     const [selectedContact, setSelectedContact] = useState<ChatContact | null>(
@@ -197,6 +204,86 @@ export default function RecentChats({ sessionString }: { sessionString: string }
     // The currently-open chat id. Used to discard in-flight fetches/polls
     // that resolve after the user has switched to a different chat.
     const activeChatIdRef = useRef<string | null>(null);
+
+    // Pin state — id of the contact whose pin button is currently working, so
+    // we can show a per-row spinner without freezing the rest of the list.
+    const [pinningId, setPinningId] = useState<string | null>(null);
+    // Toast for pin success/error (notably the Telegram pin-limit of 5).
+    const [toast, setToast] = useState<
+        { kind: "success" | "error"; message: string } | null
+    >(null);
+    useEffect(() => {
+        if (!toast) return;
+        const t = setTimeout(() => setToast(null), 3500);
+        return () => clearTimeout(t);
+    }, [toast]);
+
+    async function togglePin(contact: Contact) {
+        if (pinningId) return;
+        const nextPinned = !contact.pinMessage;
+        setPinningId(contact.id);
+        // Optimistic flip so the icon updates immediately; we revert on failure.
+        setContacts((prev) =>
+            prev.map((c) =>
+                c.id === contact.id ? { ...c, pinMessage: nextPinned } : c,
+            ),
+        );
+        try {
+            const res = await fetch("/api/telegram/pin-unpin-message", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    sessionString,
+                    userId: contact.id,
+                    accessHash: contact.accessHash,
+                    pinned: nextPinned,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                // Revert the optimistic flip.
+                setContacts((prev) =>
+                    prev.map((c) =>
+                        c.id === contact.id
+                            ? { ...c, pinMessage: !nextPinned }
+                            : c,
+                    ),
+                );
+                if (data?.code === "PINNED_DIALOGS_TOO_MUCH") {
+                    setToast({
+                        kind: "error",
+                        message:
+                            "Pin limit reached — Telegram allows up to 5 pinned chats. Unpin one to pin another.",
+                    });
+                } else {
+                    setToast({
+                        kind: "error",
+                        message: data?.error || "Failed to update pin.",
+                    });
+                }
+                return;
+            }
+            setToast({
+                kind: "success",
+                message: nextPinned ? "Chat pinned." : "Chat unpinned.",
+            });
+        } catch (err) {
+            setContacts((prev) =>
+                prev.map((c) =>
+                    c.id === contact.id
+                        ? { ...c, pinMessage: !nextPinned }
+                        : c,
+                ),
+            );
+            setToast({
+                kind: "error",
+                message:
+                    err instanceof Error ? err.message : "Failed to update pin.",
+            });
+        } finally {
+            setPinningId(null);
+        }
+    }
 
     /** Infinite scroll up: fetch a page of messages older than the oldest one
      * currently loaded, and merge them in. */
@@ -249,9 +336,20 @@ export default function RecentChats({ sessionString }: { sessionString: string }
             });
             const data = await res.json();
             if (activeChatIdRef.current !== userId) return; // switched chats
-            if (Array.isArray(data.messages)) {
+            if (Array.isArray(data.messages) && data.messages.length > 0) {
                 const incoming = (data.messages as ApiMessage[]).map(toUiMessage);
                 setMessages((prev) => mergeMessages(prev, incoming));
+                // Feed the newest message into the shared lastByChat so the
+                // recent-chats list preview stays in sync even when the SSE
+                // stream skips deltas (mobile WebViews don't always honour
+                // incremental fetch streams). Skip media-only messages whose
+                // text is empty so they don't blank out an existing preview.
+                const newest = data.messages[
+                    data.messages.length - 1
+                ] as ApiMessage;
+                if (newest.text) {
+                    noteLastMessage(userId, newest.text, newest.date);
+                }
             }
         } catch (err) {
             console.error(err);
@@ -263,6 +361,9 @@ export default function RecentChats({ sessionString }: { sessionString: string }
     async function handleSendMessage(text: string) {
         const contact = selectedContact;
         if (!contact) return;
+        // Optimistic: Telegram doesn't echo own-sends back to this session, so
+        // bump the list preview ourselves the moment the user hits send.
+        noteLastMessage(contact.id, text);
         try {
             const res = await fetch("/api/telegram/send-message", {
                 method: "POST",
@@ -277,6 +378,10 @@ export default function RecentChats({ sessionString }: { sessionString: string }
             const data = await res.json();
             if (data.message && activeChatIdRef.current === contact.id) {
                 setMessages((prev) => mergeMessages(prev, [toUiMessage(data.message)]));
+                // Refine with the server timestamp once it lands.
+                if (typeof data.message.date === "number") {
+                    noteLastMessage(contact.id, text, data.message.date);
+                }
             }
         } catch (err) {
             console.error(err);
@@ -317,6 +422,34 @@ export default function RecentChats({ sessionString }: { sessionString: string }
             console.error(err);
         }
     }
+
+    // Auto-mark-read while the chat is open: if a new incoming message arrives
+    // and bumps this chat's unread (via the SSE stream), immediately clear it
+    // both locally and on Telegram. Matches Telegram's own behaviour.
+    const activeContactId = selectedContact?.id;
+    const activeAccessHash = selectedContact?.accessHash;
+    const liveUnreadForActive = activeContactId
+        ? (unreadByChat[activeContactId] ?? 0)
+        : 0;
+    useEffect(() => {
+        if (!activeContactId || liveUnreadForActive <= 0) return;
+        markRead(activeContactId);
+        void fetch("/api/telegram/mark-read", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                sessionString,
+                userId: activeContactId,
+                accessHash: activeAccessHash,
+            }),
+        });
+    }, [
+        activeContactId,
+        liveUnreadForActive,
+        markRead,
+        sessionString,
+        activeAccessHash,
+    ]);
 
     // Live updates: poll the open conversation every 3s. The ref keeps the
     // interval stable while always calling the latest closure.
@@ -629,6 +762,13 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                             // brief window before the stream's first snapshot.
                             const liveUnread =
                                 unreadByChat[contact.id] ?? contact.unreadCount ?? 0;
+                            // Prefer the live last-message preview from the
+                            // SSE stream; fall back to the initial fetch.
+                            const liveLast = lastByChat[contact.id]?.text;
+                            const previewText =
+                                liveLast ??
+                                contact.lastMessage ??
+                                (contact.username ? `@${contact.username}` : contact.phone);
                             return (
                                 <div
                                     key={contact.id}
@@ -641,8 +781,7 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                             {name}
                                         </p>
                                         <p className="text-[11.5px] font-mono text-stone-400 dark:text-zinc-500 truncate mt-0.5">
-                                            {/* {contact.username ? `@${contact.username}` : contact.phone} */}
-                                            {contact.lastMessage ? contact.lastMessage : (contact.username ? `@${contact.username}` : contact.phone)}
+                                            {previewText}
                                         </p>
                                     </div>
                                     {liveUnread > 0 && (
@@ -650,6 +789,26 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                             {liveUnread > 99 ? "99+" : liveUnread}
                                         </span>
                                     )}
+                                    <button
+                                        disabled={pinningId === contact.id}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            void togglePin(contact);
+                                        }}
+                                        title={contact.pinMessage ? "Unpin chat" : "Pin chat"}
+                                        className={`ml-2 relative flex items-center justify-center w-6 h-6 rounded-full cursor-pointer transition-all duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 ${pinningId === contact.id ? "opacity-60 cursor-not-allowed" : ""} ${contact.pinMessage
+                                            ? "bg-indigo-500 text-white shadow-md shadow-indigo-200 hover:bg-indigo-600 focus-visible:ring-indigo-400 hover:scale-110 hover:shadow-indigo-300"
+                                            : "bg-transparent text-slate-400 border border-slate-200 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50 focus-visible:ring-indigo-300 hover:scale-110"
+                                            } active:scale-95`}
+                                    >
+                                        {pinningId === contact.id ? (
+                                            <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                        ) : contact.pinMessage ? (
+                                            <PinOff size={11} strokeWidth={2.5} />
+                                        ) : (
+                                            <Pin size={11} strokeWidth={2.5} />
+                                        )}
+                                    </button>
                                 </div>
                             );
                         })}
@@ -661,6 +820,11 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                             const gradient = getAvatarGradient(name);
                             const liveUnread =
                                 unreadByChat[contact.id] ?? contact.unreadCount ?? 0;
+                            const liveLast = lastByChat[contact.id]?.text;
+                            const previewText =
+                                liveLast ??
+                                contact.lastMessage ??
+                                (contact.username ? `@${contact.username}` : contact.phone);
                             return (
                                 <div
                                     key={contact.id}
@@ -672,6 +836,26 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                             {liveUnread > 99 ? "99+" : liveUnread}
                                         </span>
                                     )}
+                                    <button
+                                        disabled={pinningId === contact.id}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            void togglePin(contact);
+                                        }}
+                                        title={contact.pinMessage ? "Unpin chat" : "Pin chat"}
+                                        className={`absolute left-2 top-2 flex items-center justify-center w-6 h-6 rounded-full cursor-pointer transition-all duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 ${pinningId === contact.id ? "opacity-60 cursor-not-allowed" : ""} ${contact.pinMessage
+                                            ? "bg-indigo-500 text-white shadow-md shadow-indigo-200 hover:bg-indigo-600 focus-visible:ring-indigo-400 hover:scale-110"
+                                            : "bg-white/90 text-slate-400 border border-slate-200 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50 focus-visible:ring-indigo-300 hover:scale-110"
+                                            } active:scale-95`}
+                                    >
+                                        {pinningId === contact.id ? (
+                                            <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                        ) : contact.pinMessage ? (
+                                            <PinOff size={11} strokeWidth={2.5} />
+                                        ) : (
+                                            <Pin size={11} strokeWidth={2.5} />
+                                        )}
+                                    </button>
                                     <ContactAvatar
                                         contact={contact}
                                         name={name}
@@ -683,7 +867,7 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                                         {name}
                                     </p>
                                     <p className="text-[11px] font-mono text-stone-400 dark:text-zinc-500 truncate mt-1">
-                                        {contact.lastMessage ? contact.lastMessage : (contact.username ? `@${contact.username}` : contact.phone)}
+                                        {previewText}
                                     </p>
                                 </div>
                             );
@@ -725,6 +909,20 @@ export default function RecentChats({ sessionString }: { sessionString: string }
                     <ChevronRight size={14} />
                 </button>
             </div>
+
+            {toast && (
+                <div className="pointer-events-none fixed inset-x-0 top-4 z-[60] flex justify-center px-4 sm:px-6">
+                    <div
+                        role="status"
+                        className={`pointer-events-auto w-full max-w-sm rounded-2xl px-4 py-2.5 text-[13px] font-medium leading-snug shadow-lg text-center wrap-break-word ${toast.kind === "success"
+                            ? "bg-emerald-600 text-white"
+                            : "bg-red-600 text-white"
+                            }`}
+                    >
+                        {toast.message}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

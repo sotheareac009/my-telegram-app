@@ -21,6 +21,11 @@ import {
  * silently stale.
  */
 
+export interface LastMessage {
+  text: string;
+  date: number;
+}
+
 export interface UnreadState {
   users: number;
   groups: number;
@@ -28,6 +33,9 @@ export interface UnreadState {
   /** Per-chat unread count keyed by the marked id used elsewhere in the app
    * (user id for DMs, "-…" for groups, "-100…" for channels). */
   perChat: Record<string, number>;
+  /** Per-chat preview of the most recent message (text + date) — drives live
+   * "last message" updates in the recent-chats and contacts lists. */
+  lastByChat: Record<string, LastMessage>;
 }
 
 export interface UnreadContextValue extends UnreadState {
@@ -35,13 +43,25 @@ export interface UnreadContextValue extends UnreadState {
    * server will follow up with the real UpdateReadHistoryInbox event anyway,
    * but this prevents a brief flash where the badge persists. */
   markRead: (chatId: string) => void;
+  /** Push the latest message preview for a chat. Used after the user sends a
+   * message from THIS client — Telegram doesn't echo own-sends back to the
+   * source session, so the SSE stream never sees them. Date defaults to "now"
+   * so the entry sorts above any historical fallback. */
+  noteLastMessage: (chatId: string, text: string, date?: number) => void;
 }
 
-const ZERO: UnreadState = { users: 0, groups: 0, channels: 0, perChat: {} };
+const ZERO: UnreadState = {
+  users: 0,
+  groups: 0,
+  channels: 0,
+  perChat: {},
+  lastByChat: {},
+};
 
 const UnreadCtx = createContext<UnreadContextValue>({
   ...ZERO,
   markRead: () => {},
+  noteLastMessage: () => {},
 });
 
 export function useUnread(): UnreadContextValue {
@@ -54,6 +74,7 @@ interface SnapshotEvent {
   groups: number;
   channels: number;
   perChat: Record<string, number>;
+  lastByChat?: Record<string, LastMessage>;
 }
 
 interface DeltaEvent {
@@ -61,6 +82,13 @@ interface DeltaEvent {
   chatId: string;
   bucket: "users" | "groups" | "channels";
   unread: number;
+}
+
+interface LastMessageEvent {
+  kind: "lastMessage";
+  chatId: string;
+  text: string;
+  date: number;
 }
 
 interface ErrorEvent {
@@ -71,6 +99,7 @@ interface ErrorEvent {
 type StreamEvent =
   | SnapshotEvent
   | DeltaEvent
+  | LastMessageEvent
   | ErrorEvent
   | { kind: "heartbeat" };
 
@@ -133,6 +162,25 @@ export function UnreadProvider({
       };
     });
   }, []);
+
+  const noteLastMessage = useCallback(
+    (chatId: string, text: string, date?: number) => {
+      const stamp = date && date > 0 ? date : Math.floor(Date.now() / 1000);
+      setState((prev) => {
+        const existing = prev.lastByChat[chatId];
+        // Defensive: don't overwrite a strictly newer entry.
+        if (existing && existing.date > stamp) return prev;
+        return {
+          ...prev,
+          lastByChat: {
+            ...prev.lastByChat,
+            [chatId]: { text: text.slice(0, 80), date: stamp },
+          },
+        };
+      });
+    },
+    [],
+  );
 
   // Expose markRead through the imperative ref so a parent that itself
   // renders this provider (e.g. Dashboard) can clear a bucket optimistically.
@@ -209,11 +257,28 @@ export function UnreadProvider({
 
     function applyEvent(event: StreamEvent) {
       if (event.kind === "snapshot") {
-        setState({
-          users: event.users,
-          groups: event.groups,
-          channels: event.channels,
-          perChat: { ...event.perChat },
+        // The snapshot can fire again on reconnect (Telegram drops the
+        // stream's gramjs client when another route opens a session, then
+        // we reconnect). The server's seed lastByChat is whatever getDialogs
+        // saw at that moment — often older than an optimistic noteLastMessage
+        // or an incoming delta we already applied. Merge per-chat by date so
+        // a stale seed doesn't clobber newer entries.
+        setState((prev) => {
+          const incoming = event.lastByChat ?? {};
+          const mergedLast: Record<string, LastMessage> = { ...prev.lastByChat };
+          for (const [id, m] of Object.entries(incoming)) {
+            const cur = mergedLast[id];
+            if (!cur || (m.date ?? 0) >= (cur.date ?? 0)) {
+              mergedLast[id] = m;
+            }
+          }
+          return {
+            users: event.users,
+            groups: event.groups,
+            channels: event.channels,
+            perChat: { ...event.perChat },
+            lastByChat: mergedLast,
+          };
         });
         // First snapshot arrived — unblock the gated UI.
         setReady(true);
@@ -229,6 +294,24 @@ export function UnreadProvider({
             ...prev,
             [event.bucket]: Math.max(0, (prev[event.bucket] as number) - cur + next),
             perChat: nextPerChat,
+          };
+        });
+      } else if (event.kind === "lastMessage") {
+        // Update the chat's preview text — drives the live "last message"
+        // line in the recent-chats / contacts lists.
+        setState((prev) => {
+          const existing = prev.lastByChat[event.chatId];
+          // Skip if we already have a newer one (defensive against out-of-
+          // order arrival).
+          if (existing && event.date > 0 && existing.date >= event.date) {
+            return prev;
+          }
+          return {
+            ...prev,
+            lastByChat: {
+              ...prev.lastByChat,
+              [event.chatId]: { text: event.text, date: event.date },
+            },
           };
         });
       }
@@ -255,8 +338,8 @@ export function UnreadProvider({
   }, [loadingFallback, loadingTimeoutMs, ready]);
 
   const value = useMemo<UnreadContextValue>(
-    () => ({ ...state, markRead }),
-    [state, markRead],
+    () => ({ ...state, markRead, noteLastMessage }),
+    [state, markRead, noteLastMessage],
   );
 
   if (loadingFallback && !ready) {

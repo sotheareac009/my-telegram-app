@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import TelegramChat from "./TelegramChat";
+import { useUnread } from "./UnreadContext";
 import type {
   ChatMedia,
   ForwardInfo,
@@ -154,10 +155,20 @@ export default function GroupChatView({
         // The route reports membership on initial load — used to hide the
         // Join button when the account is already in the chat.
         if (typeof data.isMember === "boolean") setMember(data.isMember);
-        if (Array.isArray(data.messages)) {
+        if (Array.isArray(data.messages) && data.messages.length > 0) {
           setMessages((prev) =>
             merge(prev, (data.messages as ApiMessage[]).map(toUi)),
           );
+          // Feed the newest message into the shared lastByChat so the
+          // groups / channels / recent-chats lists update even when the SSE
+          // stream skips deltas. Skip media-only messages (empty text) so
+          // they don't blank out an existing preview.
+          const newest = data.messages[
+            data.messages.length - 1
+          ] as ApiMessage;
+          if (newest.text) {
+            noteLastMessage(id, newest.text, newest.date);
+          }
         }
       } catch {
         // ignore — keep whatever is already shown
@@ -219,6 +230,37 @@ export default function GroupChatView({
     void loadConversation(chatId, true);
   }, [chatId, loadConversation]);
 
+  // Auto-mark-read while the chat is open: if a new incoming message arrives
+  // and bumps this chat's unread (via the SSE stream), immediately clear it
+  // both locally and on Telegram. Matches the official client's behaviour —
+  // you don't carry an unread badge for messages you literally just read.
+  const { perChat: unreadByChat, markRead, noteLastMessage } = useUnread();
+  const unreadForThisChat = chatId ? (unreadByChat[chatId] ?? 0) : 0;
+  useEffect(() => {
+    if (!chatId || unreadForThisChat <= 0) return;
+    markRead(chatId);
+    void fetch("/api/telegram/mark-read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        isUser
+          ? {
+              sessionString,
+              userId: chatId,
+              accessHash: target.accessHash,
+            }
+          : { sessionString, chatId },
+      ),
+    });
+  }, [
+    chatId,
+    unreadForThisChat,
+    markRead,
+    sessionString,
+    isUser,
+    target.accessHash,
+  ]);
+
   // Fetch the chat's profile picture once per chatId. The API returns a JPEG
   // blob; we wrap it in an object URL so the Avatar can render it. Cleaned up
   // on unmount / chat switch so we don't leak the previous chat's blob.
@@ -277,6 +319,10 @@ export default function GroupChatView({
   async function handleSend(text: string) {
     const id = chatId;
     if (!id) return;
+    // Optimistic list-preview bump — Telegram doesn't deliver own-sends back
+    // to this session via the update stream, so the SSE-driven preview won't
+    // change for messages you send from here unless we update it ourselves.
+    noteLastMessage(id, text);
     try {
       const res = await fetch("/api/telegram/send-message", {
         method: "POST",
@@ -290,6 +336,9 @@ export default function GroupChatView({
       const data = await res.json();
       if (data.message && activeRef.current === id) {
         setMessages((prev) => merge(prev, [toUi(data.message)]));
+        if (typeof data.message.date === "number") {
+          noteLastMessage(id, text, data.message.date);
+        }
       }
     } catch {
       // ignore — the poll will pick the message up if it actually sent

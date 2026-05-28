@@ -26,11 +26,23 @@ interface ChatMeta {
   markedId: string;
 }
 
+interface LastMessage {
+  /** Plain-text message body, capped at 80 chars to match
+   * /api/telegram/recent-dialogs's format. Empty when the message had no text
+   * (e.g. a photo with no caption). */
+  text: string;
+  date: number;
+}
+
 interface UnreadSnapshot {
   users: number;
   groups: number;
   channels: number;
   perChat: Record<string, number>;
+  /** Latest message preview per chat, keyed by marked id. Drives the recent
+   * chats / contacts list previews so they refresh while the user is reading
+   * the open chat. */
+  lastByChat: Record<string, LastMessage>;
 }
 
 interface ClientEntry {
@@ -151,8 +163,9 @@ function ensureMeta(
 }
 
 /** Walk the dialog list and reconcile any drift between Telegram's actual
- * per-chat unread and our in-memory snapshot. Emits a delta for each chat
- * that changed so the browser's badges resync. */
+ * per-chat unread + last message and our in-memory snapshot. Emits a delta
+ * (unread) or lastMessage event for each chat that changed so the browser's
+ * badges and previews resync. */
 async function resyncSnapshot(entry: ClientEntry): Promise<void> {
   const dialogs = await entry.client.getDialogs({ limit: 1000 });
   const seen = new Set<string>();
@@ -168,6 +181,18 @@ async function resyncSnapshot(entry: ClientEntry): Promise<void> {
       });
     }
     setUnread(entry, info.markedId, info.bucket, unread);
+    // Reconcile the last-message preview too. If the stream's live
+    // NewMessage handler missed events (because another route briefly owned
+    // the gramjs connection), getDialogs still has the up-to-date last
+    // message — emit a lastMessage delta so the list previews catch up.
+    // Skip media-only messages whose text is empty so they don't blank out
+    // an existing preview.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dMsg = (d.message as any)?.message;
+    const dDate = d.date ?? 0;
+    if (typeof dMsg === "string" && dMsg.length > 0) {
+      updateLastMessage(entry, info.markedId, dMsg, dDate);
+    }
   }
   // Anything in perChat that no longer appears in dialogs (left chat, etc.)
   // gets zeroed out so the badge isn't stuck.
@@ -233,6 +258,7 @@ async function getOrCreateClient(
     groups: 0,
     channels: 0,
     perChat: {},
+    lastByChat: {},
   };
 
   const meta =
@@ -305,6 +331,18 @@ async function getOrCreateClient(
         info.bucket
       ] += unread;
     }
+
+    // Seed the lastMessage preview for every dialog (even those at zero unread)
+    // so the recent-chats list has a starting point.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const dMsg = (d.message as any)?.message;
+    const dDate = d.date ?? 0;
+    if (typeof dMsg === "string" && (dMsg.length > 0 || dDate > 0)) {
+      snapshot.lastByChat[info.markedId] = {
+        text: dMsg.slice(0, 80),
+        date: dDate,
+      };
+    }
   }
 
   const entry:
@@ -351,10 +389,6 @@ async function getOrCreateClient(
         if (!msg)
           return;
 
-        // ignore our own sends
-        if (msg.out)
-          return;
-
         const peerIds =
           peerToCandidates(
             msg.peerId,
@@ -368,6 +402,19 @@ async function getOrCreateClient(
           );
 
         if (!chatMeta)
+          return;
+
+        // Update the chat's preview text — both incoming and outgoing messages
+        // count as the "last message" in the list view. Only incoming bumps
+        // unread.
+        updateLastMessage(
+          entry,
+          chatMeta.markedId,
+          msg.message ?? "",
+          msg.date ?? 0,
+        );
+
+        if (msg.out)
           return;
 
         bumpUnread(
@@ -619,6 +666,27 @@ function bumpUnread(
   emit(entry, { kind: "delta", chatId: markedId, bucket, unread: next });
 }
 
+/** Update the chat's preview text + emit a delta so the recent-chats list
+ * reflects the new last-message in real time. Skips updates with an older
+ * timestamp than what we already have (out-of-order arrival, retry, etc.). */
+function updateLastMessage(
+  entry: ClientEntry,
+  markedId: string,
+  text: string,
+  date: number,
+) {
+  const prev = entry.snapshot.lastByChat[markedId];
+  if (prev && date > 0 && prev.date >= date) return;
+  const trimmed = text.slice(0, 80);
+  entry.snapshot.lastByChat[markedId] = { text: trimmed, date };
+  emit(entry, {
+    kind: "lastMessage",
+    chatId: markedId,
+    text: trimmed,
+    date,
+  });
+}
+
 function setUnread(
   entry: ClientEntry,
   markedId: string,
@@ -671,6 +739,7 @@ export async function POST(request: Request) {
         groups: entry.snapshot.groups,
         channels: entry.snapshot.channels,
         perChat: entry.snapshot.perChat,
+        lastByChat: entry.snapshot.lastByChat,
       });
 
       listener = send;

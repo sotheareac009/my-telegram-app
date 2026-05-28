@@ -51,6 +51,8 @@ const menuItems = [
   {
     id: "my-contacts",
     label: "My Contacts",
+    /** Used in the mobile bottom nav where six items share the screen width. */
+    mobileLabel: "Contacts",
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -61,6 +63,7 @@ const menuItems = [
   {
     id: "recent-chats",
     label: "Recent Chats",
+    mobileLabel: "Chats",
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -83,9 +86,15 @@ const menuItems = [
   },
 ];
 
-/** Format a count for the small pill — caps so it never blows out the icon. */
+/** Desktop pill — has room for the full count. */
 function formatBadge(n: number): string {
   return n > 9999 ? "9999+" : String(n);
+}
+
+/** Mobile bottom-nav pill — six items share the width, so the badge must
+ * stay narrow or it overlaps the next item. */
+function formatBadgeCompact(n: number): string {
+  return n > 99 ? "99+" : String(n);
 }
 
 export default function Sidebar({
@@ -201,12 +210,15 @@ export default function Sidebar({
       </aside>
 
       {/* Mobile bottom nav */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 flex h-16 items-center justify-around border-t border-zinc-200/80 bg-white/95 backdrop-blur-xl md:hidden dark:border-zinc-800/80 dark:bg-zinc-950/95">
+      <nav
+        className="fixed inset-x-0 bottom-0 z-40 flex h-16 items-center justify-around border-t border-zinc-200/80 bg-white/95 px-1 backdrop-blur-xl md:hidden dark:border-zinc-800/80 dark:bg-zinc-950/95"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
         {menuItems.map((item) => {
           const isActive = activeMenu === item.id;
           const count = badgeFor(item.id);
           const showBadge = count > 0;
-          const badgeText = formatBadge(count);
+          const badgeText = formatBadgeCompact(count);
           const badgeClass =
             item.id === "queue"
               ? "bg-amber-500 text-white"
@@ -215,19 +227,23 @@ export default function Sidebar({
             <button
               key={item.id}
               onClick={() => onMenuChange(item.id)}
-              className={`flex flex-1 flex-col items-center gap-1 py-2 transition-colors ${isActive ? "text-blue-600 dark:text-blue-400" : "text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+              className={`relative flex min-w-0 flex-1 flex-col items-center gap-0.5 px-0.5 py-1.5 transition-colors ${isActive ? "text-blue-600 dark:text-blue-400" : "text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
                 }`}
             >
               <span className={`relative ${isActive ? "text-blue-500" : "text-zinc-400"}`}>
                 {item.icon}
                 {showBadge && (
-                  <span className={`absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold ${badgeClass}`}>
+                  <span
+                    className={`pointer-events-none absolute -right-2 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-1 text-[9px] font-bold leading-none ${badgeClass}`}
+                  >
                     {badgeText}
                   </span>
                 )}
               </span>
-              <span className="text-[10px] font-semibold">{item.label}</span>
-              {isActive && <span className="absolute bottom-1 h-1 w-1 rounded-full bg-blue-500" />}
+              <span className="w-full truncate px-0.5 text-center text-[10px] font-semibold leading-tight">
+                {item.label}
+              </span>
+              {isActive && <span className="absolute bottom-0.5 h-1 w-1 rounded-full bg-blue-500" />}
             </button>
           );
         })}

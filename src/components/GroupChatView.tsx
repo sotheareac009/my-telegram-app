@@ -395,7 +395,15 @@ export default function GroupChatView({
         body: JSON.stringify(
           target.inviteHash
             ? { sessionString, inviteHash: target.inviteHash }
-            : { sessionString, chatId },
+            : {
+                sessionString,
+                chatId,
+                // Pass accessHash so the server can build an InputChannel
+                // directly — avoids "Could not find the input entity" on a
+                // cold gramjs client when joining via the forward-modal
+                // profile preview.
+                accessHash: target.accessHash,
+              },
         ),
       });
       const data = await res.json();

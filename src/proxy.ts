@@ -10,6 +10,7 @@ const CACHEABLE_API_PREFIXES = [
   '/api/telegram/user-photo',
   '/api/telegram/profile-photo',
   '/api/telegram/chat-media',
+  '/api/telegram/sticker-file',
   '/api/telegram/download',
 ];
 

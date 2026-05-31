@@ -28,6 +28,8 @@ interface UnreadSnapshot {
 }
 
 interface ClientEntry {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  client: any;
   snapshot: UnreadSnapshot;
   meta: Map<string, ChatMeta>;
   listeners: Set<(event: unknown) => void>;
@@ -36,6 +38,18 @@ interface ClientEntry {
 type GlobalWithCache = typeof globalThis & {
   __tgUpdateClients?: Map<string, ClientEntry>;
 };
+
+/** Return the long-lived gramjs client backing this session's SSE stream,
+ * if one exists. Lets other routes (e.g. sticker-file downloads) piggyback
+ * on the already-connected socket instead of paying TCP + handshake cost
+ * for every request. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function getSharedClient(sessionString: string): any | null {
+  return (
+    (globalThis as GlobalWithCache).__tgUpdateClients?.get(sessionString)
+      ?.client ?? null
+  );
+}
 
 /** Clear a chat's unread state in the SSE stream's snapshot and emit a delta
  * to every connected listener. Best-effort — does nothing if no stream entry

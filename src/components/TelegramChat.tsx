@@ -4,6 +4,8 @@ import { Fragment, useCallback, useState, useRef, useEffect, useLayoutEffect } f
 import { useChatNav, telegramLinkTarget } from "./ChatNavContext";
 import { useForwardJobs } from "./ForwardJobsContext";
 import DialogAvatar from "./DialogAvatar";
+import TgsSticker from "./TgsSticker";
+import StickerPicker, { type PickerSticker } from "./StickerPicker";
 import type {
     ForwardInfo,
     LinkPreview,
@@ -599,6 +601,33 @@ function MediaContent({
     }
 
     if (media.kind === "sticker") {
+        // Telegram has three sticker formats and each needs its own renderer:
+        //   image/webp          → ordinary <img>
+        //   video/webm          → <video> auto-loop
+        //   application/x-tgsticker → gzipped Lottie JSON (handled by TgsSticker)
+        const mime = media.mimeType || "";
+        if (mime === "application/x-tgsticker") {
+            return (
+                <TgsSticker
+                    src={url}
+                    thumb={media.thumb}
+                    className="block h-32 w-32"
+                />
+            );
+        }
+        if (mime === "video/webm") {
+            return (
+                <video
+                    src={url}
+                    poster={media.thumb}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="block h-32 w-32 object-contain"
+                />
+            );
+        }
         return (
             <MediaImage
                 src={url}
@@ -1972,6 +2001,42 @@ export default function TelegramChat({
     const [isTyping, setIsTyping] = useState(false);
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const [emojiCategory, setEmojiCategory] = useState(0);
+    const [showStickerPicker, setShowStickerPicker] = useState(false);
+    const [sendingSticker, setSendingSticker] = useState(false);
+
+    // Send a sticker by reference. Reuses the same parent-refresh hook the
+    // file-upload path uses (onMediaSent) so the sticker shows up in the
+    // chat without waiting for the next poll tick.
+    async function handleSendSticker(sticker: PickerSticker) {
+        if (!sessionString || sendingSticker) return;
+        setSendingSticker(true);
+        try {
+            const target = isGroup
+                ? { chatId: contact.id }
+                : { userId: contact.id, accessHash: contact.accessHash };
+            const res = await fetch("/api/telegram/send-sticker", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    sessionString,
+                    ...target,
+                    documentId: sticker.id,
+                    documentAccessHash: sticker.accessHash,
+                    fileReference: sticker.fileReference,
+                }),
+            });
+            const data = await res.json();
+            if (res.ok && !data.error) {
+                forceScrollRef.current = true;
+                setShowStickerPicker(false);
+                onMediaSent?.();
+            }
+        } catch {
+            // best-effort — leave the picker open so the user can retry
+        } finally {
+            setSendingSticker(false);
+        }
+    }
     const [recentEmojis, setRecentEmojis] = useState<string[]>(() => {
         if (typeof window === "undefined") return [];
         try {
@@ -2947,6 +3012,40 @@ export default function TelegramChat({
                                     <path d="M8.5 14.5s1 1.5 3.5 1.5 3.5-1.5 3.5-1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
                                     <circle cx="9" cy="10" r="1" fill="currentColor" />
                                     <circle cx="15" cy="10" r="1" fill="currentColor" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        {/* sticker button — opens the recent-stickers picker */}
+                        <div className="relative shrink-0">
+                            {showStickerPicker && sessionString && (
+                                <StickerPicker
+                                    sessionString={sessionString}
+                                    onSelect={handleSendSticker}
+                                    onClose={() => setShowStickerPicker(false)}
+                                />
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => setShowStickerPicker((open) => !open)}
+                                disabled={sendingSticker}
+                                className="text-[#8a9aaa] dark:text-zinc-400 hover:text-[#3390ec] transition-colors p-2 rounded-full hover:bg-[#3390ec]/10 shrink-0 mb-0.5 disabled:opacity-50"
+                                aria-label="Choose sticker"
+                                aria-expanded={showStickerPicker}
+                            >
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                                    <path
+                                        d="M3 12c0-4.97 4.03-9 9-9s9 4.03 9 9c0 .5-.04 1-.12 1.48L13 21.88A9.99 9.99 0 0 1 12 22c-4.97 0-9-4.03-9-9V12z"
+                                        stroke="currentColor"
+                                        strokeWidth="1.5"
+                                        strokeLinejoin="round"
+                                    />
+                                    <path
+                                        d="M21 12c-4.97 0-9 4.03-9 9"
+                                        stroke="currentColor"
+                                        strokeWidth="1.5"
+                                        strokeLinecap="round"
+                                    />
                                 </svg>
                             </button>
                         </div>

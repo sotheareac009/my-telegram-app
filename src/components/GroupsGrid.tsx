@@ -186,16 +186,6 @@ export default function GroupsGrid({
   const paginated = filtered.slice((currentPage - 1) * perPage, currentPage * perPage);
   const title = type === "channels" ? "Channels" : "Groups";
 
-  console.log("Rendering GroupsGrid", groups);
-
-  const totalUnread = groups?.reduce(
-    (sum, contact: any) => sum + contact.unreadCount,
-    0
-  );
-
-  console.log("Total unread count:", totalUnread);
-
-
   return (
     <div className="flex h-full flex-col">
       {/* Sticky top bar */}

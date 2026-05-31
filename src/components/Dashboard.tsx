@@ -431,6 +431,9 @@ export default function Dashboard({
             id: data.id,
             title: data.title,
             isMember: data.isMember,
+            // Thread the accessHash through — required for join + conversation
+            // calls on a cold gramjs client (every API route gets a fresh one).
+            accessHash: data.accessHash,
           });
         } else if (data.kind === "invite-preview") {
           openChat({

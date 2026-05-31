@@ -199,7 +199,7 @@ export function UnreadProvider({
     }
     let cancelled = false;
     let abort: AbortController | null = null;
-    let backoff = 1000;
+    let backoff = 500;
 
     async function connect() {
       while (!cancelled) {
@@ -214,22 +214,36 @@ export function UnreadProvider({
           if (!res.ok || !res.body) {
             throw new Error(`stream returned ${res.status}`);
           }
-          backoff = 1000;
+          backoff = 500;
           await readStream(res.body);
         } catch (err) {
           if (cancelled) return;
-          if ((err as { name?: string }).name === "AbortError") return;
+          if ((err as { name?: string }).name === "AbortError") {
+            // Either intentional cleanup or a visibility-triggered reconnect —
+            // loop back and reconnect immediately without backoff.
+            continue;
+          }
           // Stream failed before we got a snapshot — unblock the UI anyway so
           // the app isn't stuck on the spinner. Badges render as 0 until the
           // retry succeeds.
           setReady(true);
-          // Network blip or server restart — back off then retry. Cap at 30 s
-          // so a sleeping laptop doesn't take forever to recover on wake.
+          // Network blip or server restart — back off then retry. Cap at 15 s
+          // so a backgrounded mobile WebView recovers quickly when foregrounded.
           await new Promise((resolve) => setTimeout(resolve, backoff));
-          backoff = Math.min(30_000, backoff * 2);
+          backoff = Math.min(15_000, backoff * 2);
         }
       }
     }
+
+    // Mobile WebViews freeze network when the app is backgrounded and the
+    // SSE connection often comes back dead. Force a reconnect whenever the
+    // document becomes visible again so the user sees fresh state in <1s.
+    function onVisible() {
+      if (document.visibilityState === "visible" && !cancelled) {
+        abort?.abort();
+      }
+    }
+    document.addEventListener("visibilitychange", onVisible);
 
     async function readStream(body: ReadableStream<Uint8Array>) {
       const reader = body.getReader();
@@ -323,6 +337,7 @@ export function UnreadProvider({
 
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
       abort?.abort();
     };
   }, [sessionString]);

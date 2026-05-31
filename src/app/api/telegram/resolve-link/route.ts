@@ -11,6 +11,10 @@ type ResolveResult =
       title: string;
       /** Whether the account is already a member. */
       isMember: boolean;
+      /** Telegram per-channel security token — required to address the
+       * channel on a fresh gramjs connection (every API route gets one).
+       * Absent only for basic groups, which use InputPeerChat (no hash). */
+      accessHash?: string;
     }
   | {
       kind: "user";
@@ -34,7 +38,13 @@ type ResolveResult =
 /** Marked id + kind + membership for a resolved Chat/Channel entity. */
 function chatToResult(
   chat: Api.TypeChat | undefined,
-): { kind: "channel" | "group"; id: string; title: string; isMember: boolean } | null {
+): {
+  kind: "channel" | "group";
+  id: string;
+  title: string;
+  isMember: boolean;
+  accessHash?: string;
+} | null {
   if (chat instanceof Api.Channel) {
     return {
       kind: chat.megagroup ? "group" : "channel",
@@ -44,6 +54,7 @@ function chatToResult(
       title: chat.title || "Chat",
       // `left` is set when the account is not a member.
       isMember: !chat.left,
+      accessHash: chat.accessHash ? chat.accessHash.toString() : undefined,
     };
   }
   if (chat instanceof Api.Chat) {

@@ -380,12 +380,6 @@ async function getOrCreateClient(
     ) => {
       try {
         const msg = event.message;
-        console.log(
-          "[updates/stream] NewMessage fired:",
-          msg?.peerId?.className,
-          "out=" + (msg?.out ?? false),
-        );
-
         if (!msg)
           return;
 
@@ -439,11 +433,6 @@ async function getOrCreateClient(
       update: any,
     ) => {
       try {
-        const inner = update?.update ?? update;
-        const cls = inner?.className;
-        if (cls && cls !== "UpdateConnectionState") {
-          console.log("[updates/stream] raw:", cls);
-        }
         applyUpdate(
           entry,
           update,
@@ -732,6 +721,19 @@ export async function POST(request: Request) {
         }
       };
 
+      // Defeat WKWebView / Android WebView fetch-stream buffering. Both
+      // WebViews wait for ~2 KB of body before letting JS read the first
+      // chunk, which would otherwise delay the initial snapshot by seconds.
+      // Sending a padded ignore-line up front forces the buffer to flush
+      // immediately. The client's parser skips any line it can't parse.
+      try {
+        controller.enqueue(
+          encoder.encode("/" + " ".repeat(2048) + "/\n"),
+        );
+      } catch {
+        // controller closed before we even started — nothing to do
+      }
+
       // Initial snapshot so the UI can populate immediately.
       send({
         kind: "snapshot",
@@ -745,9 +747,10 @@ export async function POST(request: Request) {
       listener = send;
       entry.listeners.add(listener);
 
-      // 25 s heartbeat so the browser fetch reader / proxy timers don't
-      // assume the connection is dead.
-      heartbeat = setInterval(() => send({ kind: "heartbeat" }), 25_000);
+      // 10 s heartbeat — short enough that a stalled connection is noticed
+      // quickly on mobile (where the OS may freeze a backgrounded WebView's
+      // network), long enough not to spam.
+      heartbeat = setInterval(() => send({ kind: "heartbeat" }), 10_000);
     },
     cancel() {
       if (released) return;

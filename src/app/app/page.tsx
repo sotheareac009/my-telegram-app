@@ -389,8 +389,18 @@ export default function Home() {
         setStep("done");
         writeStoredAccounts(nextAccounts, nextAccount.id);
       } else {
+        // Logout: just reset to the login screen — do NOT call
+        // startAddAccount() here because that checks the account-limit
+        // and would show the "limit reached" modal, which is only meant
+        // for when the user explicitly tries to add a new account.
         writeStoredAccounts([], "");
-        startAddAccount();
+        setUser(null);
+        setSessionString("");
+        setPhoneNumber("");
+        setPhoneCode("");
+        setPhoneCodeHash("");
+        setPassword("");
+        setStep("phone");
       }
       setLoading(false);
     }

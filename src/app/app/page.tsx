@@ -280,7 +280,18 @@ export default function Home() {
         const currentAccountKey = accessCode
           ? `telegram_current_account_id_${accessCode}`
           : CURRENT_ACCOUNT_KEY;
-        const savedCurrentId = localStorage.getItem(currentAccountKey) || "";
+        let savedCurrentId = localStorage.getItem(currentAccountKey) || "";
+
+        // Migration of active account ID from old flat key
+        if (!savedCurrentId && accessCode) {
+          const oldCurrentId = localStorage.getItem(CURRENT_ACCOUNT_KEY) || "";
+          if (oldCurrentId && filteredAccounts.some((acc) => acc.id === oldCurrentId)) {
+            savedCurrentId = oldCurrentId;
+            localStorage.setItem(currentAccountKey, oldCurrentId);
+            localStorage.removeItem(CURRENT_ACCOUNT_KEY);
+          }
+        }
+
         const selectedAccount =
           filteredAccounts.find((account) => account.id === savedCurrentId) ??
           filteredAccounts[0];
@@ -298,9 +309,17 @@ export default function Home() {
         const legacySessionKey = accessCode
           ? `telegram_session_${accessCode}`
           : LEGACY_SESSION_KEY;
-        const legacySession =
-          localStorage.getItem(legacySessionKey) ||
-          localStorage.getItem(LEGACY_SESSION_KEY);
+        let legacySession = localStorage.getItem(legacySessionKey);
+
+        // Migration of legacy session from old flat key
+        if (!legacySession && accessCode) {
+          const oldLegacySession = localStorage.getItem(LEGACY_SESSION_KEY);
+          if (oldLegacySession) {
+            legacySession = oldLegacySession;
+            localStorage.setItem(legacySessionKey, oldLegacySession);
+            localStorage.removeItem(LEGACY_SESSION_KEY);
+          }
+        }
         if (legacySession) {
           void checkSession(legacySession, {
             preserveAccounts: filteredAccounts,
@@ -502,6 +521,19 @@ export default function Home() {
     }
   }
 
+  async function handleLogoutAccessCode() {
+    setLoading(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      window.location.href = "/";
+    } catch (err) {
+      console.error("Failed to log out of access code:", err);
+      setError("Failed to log out of access code. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function startAddAccount() {
     setError("");
 
@@ -594,6 +626,7 @@ export default function Home() {
             onSwitchAccount={handleSwitchAccount}
             onAddAccount={startAddAccount}
             onSignOut={handleSignOut}
+            onLogoutAccessCode={handleLogoutAccessCode}
           />
         </ForwardJobsProvider>
         {blockedModal && (

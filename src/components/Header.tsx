@@ -71,6 +71,7 @@ interface HeaderProps {
   onSwitchAccount: (accountId: string) => void;
   onAddAccount: () => void;
   onSignOut: () => void;
+  onLogoutAccessCode: () => void;
 }
 
 type ThemeMode = "system" | "light" | "dark";
@@ -162,6 +163,7 @@ export default function Header({
   onSwitchAccount,
   onAddAccount,
   onSignOut,
+  onLogoutAccessCode,
 }: HeaderProps) {
   const [open, setOpen] = useState(false);
   // Seed from cache immediately so the header avatar never flashes on re-render.
@@ -503,6 +505,30 @@ export default function Header({
                     </svg>
                   </div>
                   Sign out
+                </button>
+                <button
+                  onClick={() => {
+                    setOpen(false);
+                    onLogoutAccessCode();
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm text-zinc-500 hover:text-zinc-800 transition-colors hover:bg-zinc-50 dark:text-zinc-400 dark:hover:text-zinc-200 dark:hover:bg-zinc-800/60"
+                >
+                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-zinc-100 dark:bg-zinc-800">
+                    <svg
+                      width="13"
+                      height="13"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                    </svg>
+                  </div>
+                  Logout Access Code
                 </button>
               </div>
             </div>

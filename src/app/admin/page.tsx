@@ -349,6 +349,7 @@ export default function AdminDashboard() {
                 <th className="px-6 py-4 font-medium">Access Code</th>
                 <th className="px-6 py-4 font-medium">Name</th>
                 <th className="px-6 py-4 font-medium">Phone</th>
+                <th className="px-6 py-4 font-medium">Limit</th>
                 <th className="px-6 py-4 font-medium">Created</th>
                 <th className="px-6 py-4 font-medium">Status</th>
                 <th className="px-6 py-4 font-medium text-right">Actions</th>
@@ -357,7 +358,7 @@ export default function AdminDashboard() {
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
               {codes.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-8 text-center text-zinc-500">
+                  <td colSpan={7} className="px-6 py-8 text-center text-zinc-500">
                     {listLoading
                       ? "Loading…"
                       : searchQuery
@@ -379,6 +380,17 @@ export default function AdminDashboard() {
                     </td>
                     <td className="px-6 py-4 text-zinc-700 dark:text-zinc-300">
                       {code.phone_number || <span className="text-zinc-400">—</span>}
+                    </td>
+                    <td className="px-6 py-4 text-zinc-700 dark:text-zinc-300">
+                      {code.account_limit != null ? (
+                        <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-600/10 dark:bg-blue-400/10 dark:text-blue-400 dark:ring-blue-400/20">
+                          {code.account_limit} account{code.account_limit === 1 ? "" : "s"}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-md bg-zinc-50 px-2 py-1 text-xs font-medium text-zinc-600 ring-1 ring-inset ring-zinc-500/10 dark:bg-zinc-400/10 dark:text-zinc-400 dark:ring-zinc-400/20">
+                          Unlimited
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-zinc-500">
                       {new Date(code.created_at).toLocaleDateString()}

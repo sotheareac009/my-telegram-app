@@ -154,6 +154,7 @@ interface DashboardProps {
   onSwitchAccount: (accountId: string) => void;
   onAddAccount: () => void;
   onSignOut: () => void;
+  onLogoutAccessCode: () => void;
 }
 
 export default function Dashboard({
@@ -164,6 +165,7 @@ export default function Dashboard({
   onSwitchAccount,
   onAddAccount,
   onSignOut,
+  onLogoutAccessCode,
 }: DashboardProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [activeMenu, setActiveMenu] = useState<string>(readStoredActiveMenu);
@@ -590,6 +592,7 @@ export default function Dashboard({
           onSwitchAccount={handleSwitchAccount}
           onAddAccount={onAddAccount}
           onSignOut={onSignOut}
+          onLogoutAccessCode={onLogoutAccessCode}
         />
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <Sidebar

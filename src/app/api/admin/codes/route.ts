@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { trimAccountsToLimit } from '@/lib/telegram-account-link';
 
 // Helper to check admin password
 function checkAdminAuth(request: Request) {
@@ -66,6 +67,19 @@ export async function POST(request: Request) {
   const firstName = typeof body.first_name === 'string' ? body.first_name.trim() : '';
   const lastName = typeof body.last_name === 'string' ? body.last_name.trim() : '';
   const phoneNumber = typeof body.phone_number === 'string' ? body.phone_number.trim() : '';
+  // Optional cap on how many Telegram accounts this code may link. Null /
+  // missing / non-positive is treated as unlimited.
+  let accountLimit: number | null = null;
+  if (body.account_limit != null && body.account_limit !== '') {
+    const n = Number(body.account_limit);
+    if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) {
+      return NextResponse.json(
+        { error: 'account_limit must be a positive integer' },
+        { status: 400 },
+      );
+    }
+    accountLimit = n;
+  }
 
   if (!phoneNumber) {
     return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
@@ -86,6 +100,7 @@ export async function POST(request: Request) {
       first_name: firstName || null,
       last_name: lastName || null,
       phone_number: phoneNumber,
+      account_limit: accountLimit,
     }])
     .select()
     .single();
@@ -105,7 +120,7 @@ export async function PATCH(request: Request) {
 
   try {
     const body = await request.json();
-    const { id, is_active, first_name, last_name, phone_number } = body;
+    const { id, is_active, first_name, last_name, phone_number, account_limit } = body;
 
     if (!id) {
       return NextResponse.json({ error: 'id is required' }, { status: 400 });
@@ -135,6 +150,22 @@ export async function PATCH(request: Request) {
       updates.phone_number = trimmed;
     }
 
+    if (account_limit !== undefined) {
+      // null / empty string clears the cap (back to unlimited).
+      if (account_limit === null || account_limit === '') {
+        updates.account_limit = null;
+      } else {
+        const n = Number(account_limit);
+        if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) {
+          return NextResponse.json(
+            { error: 'account_limit must be a positive integer' },
+            { status: 400 },
+          );
+        }
+        updates.account_limit = n;
+      }
+    }
+
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
     }
@@ -150,7 +181,21 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json(data);
+    // If the admin lowered (or set) the cap, immediately delete the oldest
+    // excess telegram_accounts rows so the limit takes effect now instead of
+    // waiting for someone to sign out manually. No-op when the count is
+    // already within bounds or when account_limit was cleared.
+    let trimmed = 0;
+    if (
+      account_limit !== undefined &&
+      data &&
+      typeof data.account_limit === 'number' &&
+      typeof data.code === 'string'
+    ) {
+      trimmed = await trimAccountsToLimit(data.code, data.account_limit);
+    }
+
+    return NextResponse.json({ ...data, trimmed });
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }

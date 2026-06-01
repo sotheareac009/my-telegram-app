@@ -12,6 +12,8 @@ interface AccessCode {
   first_name: string | null;
   last_name: string | null;
   phone_number: string;
+  /** Max Telegram accounts this code can link; null = unlimited. */
+  account_limit: number | null;
 }
 
 export default function AdminDashboard() {
@@ -26,6 +28,8 @@ export default function AdminDashboard() {
   const [formFirstName, setFormFirstName] = useState("");
   const [formLastName, setFormLastName] = useState("");
   const [formPhone, setFormPhone] = useState("");
+  /** Empty string = unlimited; otherwise the cap as a string of digits. */
+  const [formAccountLimit, setFormAccountLimit] = useState("");
   const [generating, setGenerating] = useState(false);
   const [formError, setFormError] = useState("");
 
@@ -103,6 +107,7 @@ export default function AdminDashboard() {
     setFormFirstName("");
     setFormLastName("");
     setFormPhone("");
+    setFormAccountLimit("");
     setFormError("");
     setShowGenerateModal(true);
   }
@@ -112,6 +117,9 @@ export default function AdminDashboard() {
     setFormFirstName(code.first_name ?? "");
     setFormLastName(code.last_name ?? "");
     setFormPhone(code.phone_number ?? "");
+    setFormAccountLimit(
+      code.account_limit != null ? String(code.account_limit) : "",
+    );
     setFormError("");
     setShowGenerateModal(true);
   }
@@ -139,6 +147,9 @@ export default function AdminDashboard() {
           first_name: formFirstName,
           last_name: formLastName,
           phone_number: formPhone,
+          // Send the literal "" so the server treats it as "clear the cap"
+          // on edits. POST simply ignores empty values (defaults to unlimited).
+          account_limit: formAccountLimit.trim(),
         }),
       });
       if (res.ok) {
@@ -509,6 +520,24 @@ export default function AdminDashboard() {
                 required
                 className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
               />
+            </div>
+
+            <div className="mt-3">
+              <label className="mb-1.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                Max Telegram accounts
+              </label>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={formAccountLimit}
+                onChange={(e) => setFormAccountLimit(e.target.value)}
+                placeholder="Leave empty for unlimited"
+                className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white"
+              />
+              <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-500">
+                Cap on how many Telegram accounts this code can link to. Empty = unlimited.
+              </p>
             </div>
 
             <div className="min-h-5 mt-3">

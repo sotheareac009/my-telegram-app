@@ -61,6 +61,89 @@ function writeStoredAccounts(accounts: TelegramAccount[], currentId = "") {
   localStorage.removeItem(LEGACY_SESSION_KEY);
 }
 
+/**
+ * Premium-styled overlay shown when a user taps "Add Account" but their
+ * access code has already reached its account_limit. Frosted backdrop,
+ * gradient lock badge, soft drop shadow — matches the "Tigram" logo
+ * treatment on the auth screen so it doesn't feel like an alert dialog.
+ */
+function LimitReachedModal({
+  limit,
+  onClose,
+}: {
+  limit: number;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-[200] flex items-end justify-center bg-zinc-950/55 px-4 pb-8 pt-16 backdrop-blur-md sm:items-center sm:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Account limit reached"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative w-full max-w-sm overflow-hidden rounded-3xl border border-white/10 bg-white/95 shadow-2xl shadow-zinc-900/30 backdrop-blur-xl dark:border-white/5 dark:bg-zinc-900/95"
+      >
+        {/* Decorative top gradient strip */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-amber-500/15 via-rose-500/10 to-transparent" />
+
+        {/* Floating gradient lock badge */}
+        <div className="relative flex justify-center pt-7">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-rose-500 shadow-lg shadow-amber-500/30 ring-4 ring-white/80 dark:ring-zinc-900/80">
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="4" y="11" width="16" height="10" rx="2" />
+              <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+            </svg>
+          </div>
+        </div>
+
+        <div className="relative px-6 pb-6 pt-4 text-center">
+          <h2 className="text-[17px] font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+            Account limit reached
+          </h2>
+          <p className="mt-2 text-[13.5px] leading-relaxed text-zinc-600 dark:text-zinc-400">
+            Your access code is limited to{" "}
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+              {limit} Telegram account{limit === 1 ? "" : "s"}
+            </span>
+            .
+          </p>
+          <p className="mt-1 text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-500">
+            Sign out an existing account from the menu, or ask your admin to raise the limit.
+          </p>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="mt-5 inline-flex w-full items-center justify-center rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-zinc-900/20 transition hover:bg-zinc-800 active:scale-[0.98] dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
+          >
+            Got it
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [step, setStep] = useState<Step>("phone");
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -76,6 +159,9 @@ export default function Home() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
+  /** Premium-styled overlay shown when the user tries to add a Telegram
+   * account but their access code has hit its cap. Null = hidden. */
+  const [limitModal, setLimitModal] = useState<{ limit: number } | null>(null);
 
   useEffect(() => {
     const savedAccounts = readStoredAccounts();
@@ -238,14 +324,44 @@ export default function Home() {
     }
   }
 
-  function startAddAccount() {
+  async function startAddAccount() {
+    setError("");
+
+    // IMPORTANT: check the cap BEFORE resetting auth state. Wiping `user`
+    // up front would unmount the Dashboard and render the login screen
+    // instead, where the modal we're about to show isn't visible.
+    try {
+      const res = await fetch("/api/auth/account-limit", {
+        method: "GET",
+        // GET — no body. The cookie carries the access code.
+        credentials: "include",
+      });
+      if (res.ok) {
+        const data = (await res.json()) as {
+          atLimit?: boolean;
+          limit?: number | null;
+        };
+        if (data.atLimit && typeof data.limit === "number") {
+          // Stay on the Dashboard — modal overlays over the existing screen.
+          setLimitModal({ limit: data.limit });
+          return;
+        }
+      }
+    } catch {
+      // Best-effort — if the check itself fails, fall through to the phone
+      // form. The server-side limit check in /api/telegram/sign-in is the
+      // real gate, so a transient network blip here doesn't compromise
+      // enforcement.
+    }
+
+    // Only now reset the auth form. Doing this before the check would
+    // briefly drop the user off the Dashboard.
     setUser(null);
     setSessionString("");
     setPhoneNumber("");
     setPhoneCode("");
     setPhoneCodeHash("");
     setPassword("");
-    setError("");
     setStep("phone");
   }
 
@@ -283,24 +399,41 @@ export default function Home() {
   // Dashboard
   if (step === "done" && user) {
     return (
-      <ForwardJobsProvider session={sessionString}>
-        <Dashboard
-          key={currentAccountId || sessionString}
-          user={user}
-          session={sessionString}
-          accounts={accounts}
-          currentAccountId={currentAccountId}
-          onSwitchAccount={handleSwitchAccount}
-          onAddAccount={startAddAccount}
-          onSignOut={handleSignOut}
-        />
-      </ForwardJobsProvider>
+      <>
+        <ForwardJobsProvider session={sessionString}>
+          <Dashboard
+            key={currentAccountId || sessionString}
+            user={user}
+            session={sessionString}
+            accounts={accounts}
+            currentAccountId={currentAccountId}
+            onSwitchAccount={handleSwitchAccount}
+            onAddAccount={startAddAccount}
+            onSignOut={handleSignOut}
+          />
+        </ForwardJobsProvider>
+        {limitModal && (
+          <LimitReachedModal
+            limit={limitModal.limit}
+            onClose={() => setLimitModal(null)}
+          />
+        )}
+      </>
     );
   }
 
   // Login
   return (
     <div className="flex min-h-dvh items-center justify-center bg-gradient-to-br from-zinc-50 via-white to-blue-50/30 p-4 sm:p-6 dark:from-zinc-950 dark:via-zinc-950 dark:to-blue-950/10">
+      {/* Defensive: also render the limit modal here in case state lands
+          on the login screen with the modal already set (shouldn't happen
+          after the startAddAccount reorder above, but cheap insurance). */}
+      {limitModal && (
+        <LimitReachedModal
+          limit={limitModal.limit}
+          onClose={() => setLimitModal(null)}
+        />
+      )}
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="mb-6 flex flex-col items-center gap-4 sm:mb-8">

@@ -345,6 +345,14 @@ export default function Home() {
         // rejection cases — surface those via the premium modal instead of
         // the inline auth-card error.
         if (data.code === "invalid-account") {
+          // Reset the login form back to the phone step BEFORE showing
+          // the modal so that when the user clicks "Got it" they land on
+          // the phone-number screen, not stuck at the 2FA/code step.
+          setPhoneNumber("");
+          setPhoneCode("");
+          setPhoneCodeHash("");
+          setPassword("");
+          setStep("phone");
           setBlockedModal({ kind: "invalid" });
         } else if (
           data.code === "limit-reached" &&

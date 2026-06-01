@@ -35,9 +35,14 @@ export async function POST(request: Request) {
       // (we can't kill it server-side without an explicit sign-out), but it
       // stops being TRACKED.
       const decision = await validateNewAccount(summary.id);
-      if (decision.allowed) {
-        await linkCurrentAccount(summary);
+      if (!decision.allowed) {
+        return Response.json({
+          valid: false,
+          error: decision.message ?? "Account not permitted",
+          code: decision.code,
+        });
       }
+      await linkCurrentAccount(summary);
       return Response.json({ valid: true, user: summary });
     }
 

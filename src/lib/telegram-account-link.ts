@@ -180,7 +180,7 @@ export async function validateNewAccount(
       if (activeAccountIds && activeAccountIds.length > 0) {
         // Count only linkedIds that the client is actively using.
         const activeSet = new Set(activeAccountIds.map(String));
-        effectiveCount = [...linkedIds].filter((id) => activeSet.has(id)).size;
+        effectiveCount = [...linkedIds].filter((id) => activeSet.has(id)).length;
       } else {
         // No active IDs provided — fall back to raw DB count (safe default).
         effectiveCount = linkedIds.size;

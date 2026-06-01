@@ -30,5 +30,5 @@ export async function GET() {
   if (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }
-  return Response.json({ accounts: data ?? [] });
+  return Response.json({ accounts: data ?? [], accessCode });
 }

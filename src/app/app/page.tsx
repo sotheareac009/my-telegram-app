@@ -24,11 +24,12 @@ const ACCOUNTS_KEY = "telegram_accounts";
 const CURRENT_ACCOUNT_KEY = "telegram_current_account_id";
 const LEGACY_SESSION_KEY = "telegram_session";
 
-function readStoredAccounts(): TelegramAccount[] {
+function readStoredAccounts(accessCode?: string): TelegramAccount[] {
   if (typeof window === "undefined") return [];
 
   try {
-    const raw = localStorage.getItem(ACCOUNTS_KEY);
+    const key = accessCode ? `telegram_accounts_${accessCode}` : ACCOUNTS_KEY;
+    const raw = localStorage.getItem(key);
     if (!raw) return [];
 
     const parsed = JSON.parse(raw);
@@ -45,20 +46,24 @@ function readStoredAccounts(): TelegramAccount[] {
   }
 }
 
-function writeStoredAccounts(accounts: TelegramAccount[], currentId = "") {
-  localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(accounts));
+function writeStoredAccounts(accounts: TelegramAccount[], currentId = "", accessCode?: string) {
+  const key = accessCode ? `telegram_accounts_${accessCode}` : ACCOUNTS_KEY;
+  localStorage.setItem(key, JSON.stringify(accounts));
+
+  const currentAccountKey = accessCode ? `telegram_current_account_id_${accessCode}` : CURRENT_ACCOUNT_KEY;
+  const legacySessionKey = accessCode ? `telegram_session_${accessCode}` : LEGACY_SESSION_KEY;
 
   if (currentId) {
     const current = accounts.find((account) => account.id === currentId);
-    localStorage.setItem(CURRENT_ACCOUNT_KEY, currentId);
+    localStorage.setItem(currentAccountKey, currentId);
     if (current) {
-      localStorage.setItem(LEGACY_SESSION_KEY, current.session);
+      localStorage.setItem(legacySessionKey, current.session);
     }
     return;
   }
 
-  localStorage.removeItem(CURRENT_ACCOUNT_KEY);
-  localStorage.removeItem(LEGACY_SESSION_KEY);
+  localStorage.removeItem(currentAccountKey);
+  localStorage.removeItem(legacySessionKey);
 }
 
 /**
@@ -203,9 +208,8 @@ export default function Home() {
   const [phoneCodeHash, setPhoneCodeHash] = useState("");
   const [sessionString, setSessionString] = useState("");
   const [user, setUser] = useState<UserInfo | null>(null);
-  const [accounts, setAccounts] = useState<TelegramAccount[]>(() =>
-    readStoredAccounts()
-  );
+  const [accounts, setAccounts] = useState<TelegramAccount[]>([]);
+  const [activeAccessCode, setActiveAccessCode] = useState("");
   const [currentAccountId, setCurrentAccountId] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -222,29 +226,97 @@ export default function Home() {
   );
 
   useEffect(() => {
-    const savedAccounts = readStoredAccounts();
+    async function initSession() {
+      try {
+        // Fetch accounts linked to this access code from the server
+        const accountsRes = await fetch("/api/telegram/accounts");
+        if (!accountsRes.ok) {
+          // If the server says we are not authenticated (e.g. 401), we can't load anyway
+          setChecking(false);
+          return;
+        }
 
-    const savedCurrentId = localStorage.getItem(CURRENT_ACCOUNT_KEY) || "";
-    const selectedAccount =
-      savedAccounts.find((account) => account.id === savedCurrentId) ??
-      savedAccounts[0];
+        const accountsData = await accountsRes.json();
+        const accessCode = accountsData.accessCode || "";
+        setActiveAccessCode(accessCode);
 
-    if (selectedAccount) {
-      void checkSession(selectedAccount.session, {
-        accountId: selectedAccount.id,
-        preserveAccounts: savedAccounts,
-      });
-      return;
+        const serverLinkedIds = new Set(
+          (accountsData.accounts ?? []).map((acc: any) => String(acc.telegram_id))
+        );
+
+        // Read stored accounts from access-code-specific key
+        let savedAccounts = readStoredAccounts(accessCode);
+
+        // Backward compatibility migration:
+        // If the access-code-specific list is empty, read the old flat key,
+        // migrate matching accounts, and clean them from the flat list.
+        if (savedAccounts.length === 0) {
+          const legacyAccounts = readStoredAccounts();
+          savedAccounts = legacyAccounts.filter((acc) =>
+            serverLinkedIds.has(String(acc.user.id))
+          );
+          if (savedAccounts.length > 0) {
+            writeStoredAccounts(savedAccounts, savedAccounts[0].id, accessCode);
+            const remainingLegacy = legacyAccounts.filter(
+              (acc) => !serverLinkedIds.has(String(acc.user.id))
+            );
+            localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(remainingLegacy));
+          }
+        }
+
+        // Just in case, filter savedAccounts to be 100% in sync with the active code
+        const filteredAccounts = savedAccounts.filter((account) =>
+          serverLinkedIds.has(String(account.user.id))
+        );
+
+        if (filteredAccounts.length !== savedAccounts.length) {
+          writeStoredAccounts(filteredAccounts, "", accessCode);
+        }
+
+        // Update state with clean list
+        setAccounts(filteredAccounts);
+
+        // Select the current account to initialize
+        const currentAccountKey = accessCode
+          ? `telegram_current_account_id_${accessCode}`
+          : CURRENT_ACCOUNT_KEY;
+        const savedCurrentId = localStorage.getItem(currentAccountKey) || "";
+        const selectedAccount =
+          filteredAccounts.find((account) => account.id === savedCurrentId) ??
+          filteredAccounts[0];
+
+        if (selectedAccount) {
+          void checkSession(selectedAccount.session, {
+            accountId: selectedAccount.id,
+            preserveAccounts: filteredAccounts,
+            accessCode,
+          });
+          return;
+        }
+
+        // Check legacy session
+        const legacySessionKey = accessCode
+          ? `telegram_session_${accessCode}`
+          : LEGACY_SESSION_KEY;
+        const legacySession =
+          localStorage.getItem(legacySessionKey) ||
+          localStorage.getItem(LEGACY_SESSION_KEY);
+        if (legacySession) {
+          void checkSession(legacySession, {
+            preserveAccounts: filteredAccounts,
+            accessCode,
+          });
+          return;
+        }
+
+        setChecking(false);
+      } catch (err) {
+        console.error("Failed to initialize session:", err);
+        setChecking(false);
+      }
     }
 
-    const legacySession = localStorage.getItem(LEGACY_SESSION_KEY);
-    if (legacySession) {
-      void checkSession(legacySession);
-      return;
-    }
-
-    const id = window.setTimeout(() => setChecking(false), 0);
-    return () => window.clearTimeout(id);
+    void initSession();
   }, []);
 
   async function validateSession(session: string): Promise<UserInfo | null> {
@@ -259,8 +331,9 @@ export default function Home() {
 
   async function checkSession(
     session: string,
-    options: { accountId?: string; preserveAccounts?: TelegramAccount[] } = {}
+    options: { accountId?: string; preserveAccounts?: TelegramAccount[]; accessCode?: string } = {}
   ) {
+    const codeToUse = options.accessCode || activeAccessCode;
     try {
       const validUser = await validateSession(session);
       if (validUser) {
@@ -282,16 +355,17 @@ export default function Home() {
         setSessionString(session);
         setIsAddingAccount(false);
         setStep("done");
-        writeStoredAccounts(nextAccounts, accountId);
+        writeStoredAccounts(nextAccounts, accountId, codeToUse);
       } else {
         const nextAccounts = (options.preserveAccounts ?? accounts).filter(
           (account) => account.session !== session
         );
         setAccounts(nextAccounts);
-        writeStoredAccounts(nextAccounts, nextAccounts[0]?.id ?? "");
+        writeStoredAccounts(nextAccounts, nextAccounts[0]?.id ?? "", codeToUse);
       }
     } catch {
-      localStorage.removeItem(LEGACY_SESSION_KEY);
+      const legacySessionKey = codeToUse ? `telegram_session_${codeToUse}` : LEGACY_SESSION_KEY;
+      localStorage.removeItem(legacySessionKey);
     } finally {
       setChecking(false);
     }
@@ -408,13 +482,13 @@ export default function Home() {
         setSessionString(nextAccount.session);
         setCurrentAccountId(nextAccount.id);
         setStep("done");
-        writeStoredAccounts(nextAccounts, nextAccount.id);
+        writeStoredAccounts(nextAccounts, nextAccount.id, activeAccessCode);
       } else {
         // Logout: just reset to the login screen — do NOT call
         // startAddAccount() here because that checks the account-limit
         // and would show the "limit reached" modal, which is only meant
         // for when the user explicitly tries to add a new account.
-        writeStoredAccounts([], "");
+        writeStoredAccounts([], "", activeAccessCode);
         setUser(null);
         setSessionString("");
         setPhoneNumber("");
@@ -491,7 +565,7 @@ export default function Home() {
     }
 
     // Persist the new current account first so the reload picks it up.
-    writeStoredAccounts(accounts, account.id);
+    writeStoredAccounts(accounts, account.id, activeAccessCode);
     window.location.reload();
   }
 

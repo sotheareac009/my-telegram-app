@@ -78,24 +78,48 @@ export interface AccountValidation {
   limit?: number;
 }
 
+export interface ValidateNewAccountOptions {
+  /**
+   * Set to true when the user explicitly clicked "Add account" from the
+   * header menu. In that case the identity-binding check is skipped —
+   * any Telegram account may be added as long as the count limit allows it.
+   * The identity check still applies on a first-time / fresh login.
+   */
+  addAccount?: boolean;
+  /**
+   * Only meaningful when addAccount=true. The telegram_ids that are
+   * CURRENTLY active in the client's session (from localStorage). Used to
+   * compute the effective active count instead of the raw DB row count,
+   * because sign-out intentionally keeps DB rows (for identity binding) so
+   * historical rows from old sessions would otherwise over-count the slots.
+   *
+   * The server intersects this list with the DB's linkedIds, so a client
+   * cannot spoof its way past the limit by providing fake IDs.
+   */
+  activeAccountIds?: string[];
+}
+
 /**
  * Full check applied at sign-in (and check-session) time. Rules:
  *
  *   1. If the signing-in telegram_id is already linked to this access code,
  *      always allow — re-signing in an existing account never needs gating.
- *   2. If at least one OTHER telegram_id is already linked, reject with
- *      `invalid-account`. This binds the access code to its initial user(s);
- *      a third party who somehow obtained the code can't sign in to a
- *      different Telegram account with it.
- *   3. If no linked accounts yet and account_limit is positive, allow the
- *      first sign-in (which will create the binding).
+ *   2. (Login only, skipped when addAccount=true) If at least one OTHER
+ *      telegram_id is already linked, reject with `invalid-account`. This
+ *      binds the access code to its initial user(s); a third party who
+ *      somehow obtained the code can't sign in to a different Telegram
+ *      account with it.
+ *   3. If no linked accounts yet (or addAccount=true) and account_limit is
+ *      positive, check the count against the cap.
  *
  * Fails open on DB errors — better to let a sign-in through during a
  * Supabase blip than to lock everyone out.
  */
 export async function validateNewAccount(
   telegramId: string,
+  options: ValidateNewAccountOptions = {},
 ): Promise<AccountValidation> {
+  const { addAccount = false, activeAccountIds } = options;
   try {
     const cookieStore = await cookies();
     const accessCode = cookieStore.get("app_access_code")?.value;
@@ -113,8 +137,9 @@ export async function validateNewAccount(
     // Re-sign-in of an already-linked account is always fine.
     if (linkedIds.has(telegramId)) return { allowed: true };
 
-    // Identity rule: any prior link means no NEW telegram_ids permitted.
-    if (linkedIds.size > 0) {
+    // Identity rule: only enforced on first-time login, NOT when the user
+    // deliberately adds another account via the header "Add account" button.
+    if (!addAccount && linkedIds.size > 0) {
       return {
         allowed: false,
         code: "invalid-account",
@@ -123,8 +148,7 @@ export async function validateNewAccount(
       };
     }
 
-    // No prior links — first sign-in. Still respect a hard 0/negative
-    // account_limit if the admin set one (effectively "code disabled").
+    // Count-limit check (applies in both flows).
     const { data: code } = await supabase
       .from("access_codes")
       .select("account_limit")
@@ -132,6 +156,8 @@ export async function validateNewAccount(
       .single();
     const limit: number | null =
       code?.account_limit != null ? Number(code.account_limit) : null;
+
+    // A limit of 0 or negative means the code is disabled entirely.
     if (limit != null && limit <= 0) {
       return {
         allowed: false,
@@ -140,6 +166,34 @@ export async function validateNewAccount(
         message:
           "This access code is not currently accepting Telegram accounts.",
       };
+    }
+
+    // When adding an account, enforce the count cap. Sign-out intentionally
+    // keeps DB rows for identity-binding reasons, so raw linkedIds.size can
+    // be larger than the number of accounts the user currently has active.
+    // We use the intersection of the client-provided activeAccountIds with
+    // the DB's linkedIds as the effective active count — this prevents stale
+    // rows from blocking legitimate additions while preventing the client
+    // from spoofing a lower count with fake IDs.
+    if (addAccount && limit != null) {
+      let effectiveCount: number;
+      if (activeAccountIds && activeAccountIds.length > 0) {
+        // Count only linkedIds that the client is actively using.
+        const activeSet = new Set(activeAccountIds.map(String));
+        effectiveCount = [...linkedIds].filter((id) => activeSet.has(id)).size;
+      } else {
+        // No active IDs provided — fall back to raw DB count (safe default).
+        effectiveCount = linkedIds.size;
+      }
+
+      if (effectiveCount >= limit) {
+        return {
+          allowed: false,
+          code: "limit-reached",
+          limit,
+          message: `This access code has reached its limit of ${limit} Telegram account${limit === 1 ? "" : "s"}.`,
+        };
+      }
     }
 
     return { allowed: true };

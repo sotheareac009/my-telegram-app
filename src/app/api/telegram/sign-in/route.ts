@@ -4,6 +4,7 @@ import {
   linkCurrentAccount,
   validateNewAccount,
   type TelegramUserSummary,
+  type ValidateNewAccountOptions,
 } from "@/lib/telegram-account-link";
 
 export const runtime = "nodejs";
@@ -34,8 +35,13 @@ async function getSelf(client: any): Promise<TelegramUserSummary | null> {
 
 export async function POST(request: Request) {
   try {
-    const { phoneNumber, phoneCode, phoneCodeHash, sessionString, password } =
+    const { phoneNumber, phoneCode, phoneCodeHash, sessionString, password, addAccount, activeAccountIds } =
       await request.json();
+
+    const validateOpts: ValidateNewAccountOptions = {
+      addAccount: Boolean(addAccount),
+      activeAccountIds: Array.isArray(activeAccountIds) ? activeAccountIds : undefined,
+    };
 
     const client = createClient(sessionString);
     await client.connect();
@@ -78,7 +84,7 @@ export async function POST(request: Request) {
     // leak it.
     const self = await getSelf(client);
     if (self) {
-      const decision = await validateNewAccount(self.id);
+      const decision = await validateNewAccount(self.id, validateOpts);
       if (!decision.allowed) {
         try {
           await client.invoke(new Api.auth.LogOut());

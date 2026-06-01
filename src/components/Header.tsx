@@ -3,6 +3,52 @@
 import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 
+/**
+ * Module-level cache: session string → blob object URL.
+ * Persists for the lifetime of the browser tab so profile photos are
+ * fetched at most once per session, regardless of how many times the
+ * component mounts/unmounts (e.g. opening/closing the dropdown).
+ */
+const photoCache = new Map<string, string>();
+
+/**
+ * In-flight promise cache: prevents multiple concurrent fetches for the
+ * same session when several components mount simultaneously.
+ */
+const photoInFlight = new Map<string, Promise<string | null>>();
+
+async function fetchProfilePhoto(session: string): Promise<string | null> {
+  // Return cached URL immediately.
+  const cached = photoCache.get(session);
+  if (cached) return cached;
+
+  // Reuse an in-flight promise if one already started.
+  const inFlight = photoInFlight.get(session);
+  if (inFlight) return inFlight;
+
+  const promise = (async () => {
+    try {
+      const res = await fetch("/api/telegram/profile-photo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionString: session }),
+      });
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      photoCache.set(session, url);
+      return url;
+    } catch {
+      return null;
+    } finally {
+      photoInFlight.delete(session);
+    }
+  })();
+
+  photoInFlight.set(session, promise);
+  return promise;
+}
+
 interface UserInfo {
   id: string;
   firstName?: string;
@@ -74,39 +120,26 @@ function InitialsAvatar({
 }
 
 function AccountAvatar({ account }: { account: TelegramAccount }) {
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  // Seed from cache so there's no flash on remount (e.g. reopening the dropdown).
+  const [photoUrl, setPhotoUrl] = useState<string | null>(
+    () => photoCache.get(account.session) ?? null
+  );
   const [photoFailed, setPhotoFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    let objectUrl: string | null = null;
 
-    async function loadPhoto() {
-      setPhotoFailed(false);
-      setPhotoUrl(null);
-      try {
-        const res = await fetch("/api/telegram/profile-photo", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionString: account.session }),
-        });
-        if (!res.ok) {
-          if (!cancelled) setPhotoFailed(true);
-          return;
-        }
-        const blob = await res.blob();
-        objectUrl = URL.createObjectURL(blob);
-        if (!cancelled) setPhotoUrl(objectUrl);
-      } catch {
-        if (!cancelled) setPhotoFailed(true);
+    // Already cached — nothing to do.
+    if (photoCache.has(account.session)) return;
+
+    fetchProfilePhoto(account.session).then((url) => {
+      if (!cancelled) {
+        if (url) setPhotoUrl(url);
+        else setPhotoFailed(true);
       }
-    }
+    });
 
-    void loadPhoto();
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
+    return () => { cancelled = true; };
   }, [account.session]);
 
   if (photoUrl && !photoFailed)
@@ -131,7 +164,10 @@ export default function Header({
   onSignOut,
 }: HeaderProps) {
   const [open, setOpen] = useState(false);
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  // Seed from cache immediately so the header avatar never flashes on re-render.
+  const [photoUrl, setPhotoUrl] = useState<string | null>(
+    () => photoCache.get(session) ?? null
+  );
   const [photoFailed, setPhotoFailed] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialThemeMode);
   const [themeOpen, setThemeOpen] = useState(false);
@@ -164,32 +200,25 @@ export default function Header({
 
   useEffect(() => {
     let cancelled = false;
-    let objectUrl: string | null = null;
-    async function loadPhoto() {
-      setPhotoFailed(false);
-      setPhotoUrl(null);
-      try {
-        const res = await fetch("/api/telegram/profile-photo", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionString: session }),
-        });
-        if (!res.ok) {
-          if (!cancelled) setPhotoFailed(true);
-          return;
-        }
-        const blob = await res.blob();
-        objectUrl = URL.createObjectURL(blob);
-        if (!cancelled) setPhotoUrl(objectUrl);
-      } catch {
-        if (!cancelled) setPhotoFailed(true);
-      }
+
+    // If the session changes (account switch), reset failed state and
+    // try to load. If already cached, just sync state without a network hit.
+    setPhotoFailed(false);
+    const cached = photoCache.get(session);
+    if (cached) {
+      setPhotoUrl(cached);
+      return;
     }
-    void loadPhoto();
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
+
+    setPhotoUrl(null);
+    fetchProfilePhoto(session).then((url) => {
+      if (!cancelled) {
+        if (url) setPhotoUrl(url);
+        else setPhotoFailed(true);
+      }
+    });
+
+    return () => { cancelled = true; };
   }, [session]);
 
   const initials = getInitials(user);

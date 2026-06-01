@@ -210,6 +210,10 @@ export default function Home() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
+  /** True when the user clicked "Add account" from the header menu.
+   * Passed to the sign-in API so it skips the identity-binding check
+   * and only enforces the count limit. */
+  const [isAddingAccount, setIsAddingAccount] = useState(false);
   /** Premium-styled overlay shown when a sign-in / add-account attempt is
    * blocked. Two reasons: cap exhausted, or the Telegram account isn't
    * authorized for this access code. Null = hidden. */
@@ -276,6 +280,7 @@ export default function Home() {
         setCurrentAccountId(accountId);
         setUser(validUser);
         setSessionString(session);
+        setIsAddingAccount(false);
         setStep("done");
         writeStoredAccounts(nextAccounts, accountId);
       } else {
@@ -331,6 +336,14 @@ export default function Home() {
           phoneCodeHash,
           sessionString,
           password: step === "password" ? password : undefined,
+          addAccount: isAddingAccount,
+          // Provide the currently-active telegram IDs so the server can
+          // compute the effective active count (intersection with DB rows)
+          // instead of using the raw historical DB count, which can be
+          // inflated by rows that persist after sign-out.
+          activeAccountIds: isAddingAccount
+            ? accounts.map((a) => a.user.id)
+            : undefined,
         }),
       });
       const data = (await res.json()) as {
@@ -408,6 +421,7 @@ export default function Home() {
         setPhoneCode("");
         setPhoneCodeHash("");
         setPassword("");
+        setIsAddingAccount(false);
         setStep("phone");
       }
       setLoading(false);
@@ -431,8 +445,16 @@ export default function Home() {
           atLimit?: boolean;
           limit?: number | null;
         };
-        if (data.atLimit && typeof data.limit === "number") {
-          // Stay on the Dashboard — modal overlays over the existing screen.
+        // Compare against the number of accounts currently ACTIVE in the
+        // app rather than data.atLimit (which uses the raw DB count). The
+        // DB keeps rows after sign-out for identity-binding reasons, so it
+        // can report "at limit" even when the user has fewer active sessions
+        // than the actual cap.
+        if (
+          typeof data.limit === "number" &&
+          data.limit > 0 &&
+          accounts.length >= data.limit
+        ) {
           setBlockedModal({ kind: "limit", limit: data.limit });
           return;
         }
@@ -446,6 +468,7 @@ export default function Home() {
 
     // Only now reset the auth form. Doing this before the check would
     // briefly drop the user off the Dashboard.
+    setIsAddingAccount(true);
     setUser(null);
     setSessionString("");
     setPhoneNumber("");
@@ -467,11 +490,9 @@ export default function Home() {
       return;
     }
 
-    setUser(account.user);
-    setSessionString(account.session);
-    setCurrentAccountId(account.id);
-    setStep("done");
+    // Persist the new current account first so the reload picks it up.
     writeStoredAccounts(accounts, account.id);
+    window.location.reload();
   }
 
   // Loading state
@@ -492,7 +513,6 @@ export default function Home() {
       <>
         <ForwardJobsProvider session={sessionString}>
           <Dashboard
-            key={currentAccountId || sessionString}
             user={user}
             session={sessionString}
             accounts={accounts}

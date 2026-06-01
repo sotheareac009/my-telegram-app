@@ -532,6 +532,7 @@ export default function Dashboard({
 
   function handleSwitchAccount(accountId: string) {
     setSelectedGroup(null);
+    setActiveMenu("home");
     setActiveFolderByType({ groups: "all", channels: "all" });
     setPageByType({ groups: 1, channels: 1 });
     setGroupsCache(null);

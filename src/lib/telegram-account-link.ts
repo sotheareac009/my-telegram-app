@@ -61,6 +61,95 @@ export interface AccountLimitDecision {
 }
 
 /**
+ * Result of `validateNewAccount` — combines the numeric account_limit check
+ * AND the identity-binding rule (once any telegram_id is linked under a
+ * given access code, only those telegram_ids can sign in with it).
+ *
+ * The `code` discriminator lets the client show different UI for the two
+ * rejection cases — a "limit reached" badge vs an "account invalid" badge.
+ */
+export interface AccountValidation {
+  allowed: boolean;
+  /** Machine-readable rejection reason. */
+  code?: "invalid-account" | "limit-reached";
+  /** Human-readable message to surface to the user. */
+  message?: string;
+  /** For limit-reached only — the configured cap. */
+  limit?: number;
+}
+
+/**
+ * Full check applied at sign-in (and check-session) time. Rules:
+ *
+ *   1. If the signing-in telegram_id is already linked to this access code,
+ *      always allow — re-signing in an existing account never needs gating.
+ *   2. If at least one OTHER telegram_id is already linked, reject with
+ *      `invalid-account`. This binds the access code to its initial user(s);
+ *      a third party who somehow obtained the code can't sign in to a
+ *      different Telegram account with it.
+ *   3. If no linked accounts yet and account_limit is positive, allow the
+ *      first sign-in (which will create the binding).
+ *
+ * Fails open on DB errors — better to let a sign-in through during a
+ * Supabase blip than to lock everyone out.
+ */
+export async function validateNewAccount(
+  telegramId: string,
+): Promise<AccountValidation> {
+  try {
+    const cookieStore = await cookies();
+    const accessCode = cookieStore.get("app_access_code")?.value;
+    if (!accessCode) return { allowed: true };
+
+    // Pull existing linked telegram_ids in one query.
+    const { data: existing } = await supabase
+      .from("telegram_accounts")
+      .select("telegram_id")
+      .eq("access_code", accessCode);
+    const linkedIds = new Set(
+      (existing ?? []).map((r) => String(r.telegram_id)),
+    );
+
+    // Re-sign-in of an already-linked account is always fine.
+    if (linkedIds.has(telegramId)) return { allowed: true };
+
+    // Identity rule: any prior link means no NEW telegram_ids permitted.
+    if (linkedIds.size > 0) {
+      return {
+        allowed: false,
+        code: "invalid-account",
+        message:
+          "This Telegram account isn't authorized for this access code. Sign in with the original account, or ask the admin to issue a new code.",
+      };
+    }
+
+    // No prior links — first sign-in. Still respect a hard 0/negative
+    // account_limit if the admin set one (effectively "code disabled").
+    const { data: code } = await supabase
+      .from("access_codes")
+      .select("account_limit")
+      .eq("code", accessCode)
+      .single();
+    const limit: number | null =
+      code?.account_limit != null ? Number(code.account_limit) : null;
+    if (limit != null && limit <= 0) {
+      return {
+        allowed: false,
+        code: "limit-reached",
+        limit,
+        message:
+          "This access code is not currently accepting Telegram accounts.",
+      };
+    }
+
+    return { allowed: true };
+  } catch (err) {
+    console.warn("[validateNewAccount] failed:", err);
+    return { allowed: true };
+  }
+}
+
+/**
  * Check whether the current access code is allowed to link a new Telegram
  * account. Reads `access_codes.account_limit` (null = unlimited) and the
  * current count of rows in `telegram_accounts` for this code.

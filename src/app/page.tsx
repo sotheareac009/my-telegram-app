@@ -342,6 +342,17 @@ export default function LandingPage() {
               ),
             },
             {
+              title: "Seat-limited access codes",
+              desc: "Cap each access code to a set number of Telegram accounts. Hit the limit and a polished out-of-seats notice takes over — no half-broken sign-ins.",
+              icon: (
+                <>
+                  <circle cx="7.5" cy="15.5" r="5.5" />
+                  <path d="m21 2-9.6 9.6" />
+                  <path d="m15.5 7.5 3 3L22 7l-3-3" />
+                </>
+              ),
+            },
+            {
               title: "Native encryption",
               desc: "Built on Telegram's MTProto. Your sessions stay on your device — never on ours.",
               icon: (

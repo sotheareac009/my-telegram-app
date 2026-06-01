@@ -1,8 +1,8 @@
 import { createClient } from "@/lib/telegram";
 import { Api } from "telegram";
 import {
-  checkAccountLimit,
   linkCurrentAccount,
+  validateNewAccount,
 } from "@/lib/telegram-account-link";
 
 export async function POST(request: Request) {
@@ -28,13 +28,13 @@ export async function POST(request: Request) {
         phone: userInfo.phone ?? undefined,
       };
       // Backfill / refresh the (access_code, telegram_id) row — but respect
-      // the account_limit. If this Telegram account was trimmed because the
-      // admin lowered the cap, we mustn't silently re-insert it just because
-      // the session is still in localStorage. The session itself remains
-      // valid (we can't kill it server-side without an explicit sign-out),
-      // but it stops being TRACKED and won't be allowed back in on a fresh
-      // sign-in until the admin raises the limit.
-      const decision = await checkAccountLimit(summary.id);
+      // both the account_limit AND the identity binding. If this Telegram
+      // account was trimmed by a manual delete (or never authorized for
+      // this code), we mustn't silently re-insert it just because the
+      // session is still in localStorage. The session itself remains valid
+      // (we can't kill it server-side without an explicit sign-out), but it
+      // stops being TRACKED.
+      const decision = await validateNewAccount(summary.id);
       if (decision.allowed) {
         await linkCurrentAccount(summary);
       }

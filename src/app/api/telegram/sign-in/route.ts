@@ -1,8 +1,8 @@
 import { createClient } from "@/lib/telegram";
 import { Api } from "telegram";
 import {
-  checkAccountLimit,
   linkCurrentAccount,
+  validateNewAccount,
   type TelegramUserSummary,
 } from "@/lib/telegram-account-link";
 
@@ -73,13 +73,13 @@ export async function POST(request: Request) {
     }
 
     // Sign-in succeeded on Telegram's side. Before persisting the link or
-    // returning the session, enforce this access code's account_limit.
+    // returning the session, run the combined validation: limit + identity
+    // binding. If anything rejects, log the fresh session out so we don't
+    // leak it.
     const self = await getSelf(client);
     if (self) {
-      const decision = await checkAccountLimit(self.id);
+      const decision = await validateNewAccount(self.id);
       if (!decision.allowed) {
-        // Roll back the freshly-created Telegram session so we don't leak
-        // an authenticated session for an account that's been refused.
         try {
           await client.invoke(new Api.auth.LogOut());
         } catch {
@@ -89,7 +89,13 @@ export async function POST(request: Request) {
         }
         await client.disconnect();
         return Response.json(
-          { error: decision.reason ?? "Account limit reached" },
+          {
+            error: decision.message ?? "Account not permitted",
+            // Discriminator so the client can render the right modal
+            // ("Account limit reached" vs "Account not authorized").
+            code: decision.code,
+            limit: decision.limit,
+          },
           { status: 403 },
         );
       }

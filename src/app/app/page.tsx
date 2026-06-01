@@ -62,16 +62,21 @@ function writeStoredAccounts(accounts: TelegramAccount[], currentId = "") {
 }
 
 /**
- * Premium-styled overlay shown when a user taps "Add Account" but their
- * access code has already reached its account_limit. Frosted backdrop,
- * gradient lock badge, soft drop shadow — matches the "Tigram" logo
- * treatment on the auth screen so it doesn't feel like an alert dialog.
+ * Premium-styled overlay shown when a sign-in attempt is rejected. Two
+ * variants: `limit` (cap exhausted) and `invalid` (Telegram account not
+ * bound to this access code). Frosted backdrop, gradient badge, soft drop
+ * shadow — matches the "Tigram" logo treatment on the auth screen so it
+ * doesn't feel like a system alert.
  */
-function LimitReachedModal({
-  limit,
+type AccessBlockedKind =
+  | { kind: "limit"; limit: number }
+  | { kind: "invalid" };
+
+function AccessBlockedModal({
+  payload,
   onClose,
 }: {
-  limit: number;
+  payload: AccessBlockedKind;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -82,24 +87,75 @@ function LimitReachedModal({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Per-variant copy + icon. The shell + animation is shared.
+  const view =
+    payload.kind === "limit"
+      ? {
+          title: "Account limit reached",
+          body: (
+            <>
+              Your access code is limited to{" "}
+              <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                {payload.limit} Telegram account
+                {payload.limit === 1 ? "" : "s"}
+              </span>
+              .
+            </>
+          ),
+          subtle:
+            "Sign out an existing account from the menu, or ask your admin to raise the limit.",
+          gradient: "from-amber-400 to-rose-500",
+          tintFrom: "from-amber-500/15",
+          tintVia: "via-rose-500/10",
+          icon: (
+            <>
+              <rect x="4" y="11" width="16" height="10" rx="2" />
+              <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+            </>
+          ),
+        }
+      : {
+          title: "Account not authorized",
+          body: (
+            <>
+              This Telegram account isn&apos;t linked to your access code.
+            </>
+          ),
+          subtle:
+            "Sign in with the original Telegram account that registered this code, or contact your admin to issue a new code.",
+          gradient: "from-rose-500 to-fuchsia-600",
+          tintFrom: "from-rose-500/15",
+          tintVia: "via-fuchsia-500/10",
+          icon: (
+            <>
+              <circle cx="12" cy="12" r="10" />
+              <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+            </>
+          ),
+        };
+
   return (
     <div
       onClick={onClose}
       className="fixed inset-0 z-[200] flex items-end justify-center bg-zinc-950/55 px-4 pb-8 pt-16 backdrop-blur-md sm:items-center sm:p-6"
       role="dialog"
       aria-modal="true"
-      aria-label="Account limit reached"
+      aria-label={view.title}
     >
       <div
         onClick={(e) => e.stopPropagation()}
         className="relative w-full max-w-sm overflow-hidden rounded-3xl border border-white/10 bg-white/95 shadow-2xl shadow-zinc-900/30 backdrop-blur-xl dark:border-white/5 dark:bg-zinc-900/95"
       >
         {/* Decorative top gradient strip */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-amber-500/15 via-rose-500/10 to-transparent" />
+        <div
+          className={`pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b ${view.tintFrom} ${view.tintVia} to-transparent`}
+        />
 
-        {/* Floating gradient lock badge */}
+        {/* Floating gradient badge */}
         <div className="relative flex justify-center pt-7">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-rose-500 shadow-lg shadow-amber-500/30 ring-4 ring-white/80 dark:ring-zinc-900/80">
+          <div
+            className={`flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br ${view.gradient} shadow-lg shadow-rose-500/30 ring-4 ring-white/80 dark:ring-zinc-900/80`}
+          >
             <svg
               width="22"
               height="22"
@@ -110,25 +166,20 @@ function LimitReachedModal({
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              <rect x="4" y="11" width="16" height="10" rx="2" />
-              <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+              {view.icon}
             </svg>
           </div>
         </div>
 
         <div className="relative px-6 pb-6 pt-4 text-center">
           <h2 className="text-[17px] font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-            Account limit reached
+            {view.title}
           </h2>
           <p className="mt-2 text-[13.5px] leading-relaxed text-zinc-600 dark:text-zinc-400">
-            Your access code is limited to{" "}
-            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-              {limit} Telegram account{limit === 1 ? "" : "s"}
-            </span>
-            .
+            {view.body}
           </p>
           <p className="mt-1 text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-500">
-            Sign out an existing account from the menu, or ask your admin to raise the limit.
+            {view.subtle}
           </p>
 
           <button
@@ -159,9 +210,12 @@ export default function Home() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
-  /** Premium-styled overlay shown when the user tries to add a Telegram
-   * account but their access code has hit its cap. Null = hidden. */
-  const [limitModal, setLimitModal] = useState<{ limit: number } | null>(null);
+  /** Premium-styled overlay shown when a sign-in / add-account attempt is
+   * blocked. Two reasons: cap exhausted, or the Telegram account isn't
+   * authorized for this access code. Null = hidden. */
+  const [blockedModal, setBlockedModal] = useState<AccessBlockedKind | null>(
+    null,
+  );
 
   useEffect(() => {
     const savedAccounts = readStoredAccounts();
@@ -279,12 +333,30 @@ export default function Home() {
           password: step === "password" ? password : undefined,
         }),
       });
-      const data = await res.json();
+      const data = (await res.json()) as {
+        error?: string;
+        code?: "invalid-account" | "limit-reached";
+        limit?: number;
+        requiresPassword?: boolean;
+        session?: string;
+      };
       if (data.error) {
-        setError(data.error);
+        // Server attaches a `code` discriminator for the two structured
+        // rejection cases — surface those via the premium modal instead of
+        // the inline auth-card error.
+        if (data.code === "invalid-account") {
+          setBlockedModal({ kind: "invalid" });
+        } else if (
+          data.code === "limit-reached" &&
+          typeof data.limit === "number"
+        ) {
+          setBlockedModal({ kind: "limit", limit: data.limit });
+        } else {
+          setError(data.error);
+        }
       } else if (data.requiresPassword) {
         setStep("password");
-      } else {
+      } else if (data.session) {
         setSessionString(data.session);
         await checkSession(data.session);
       }
@@ -343,7 +415,7 @@ export default function Home() {
         };
         if (data.atLimit && typeof data.limit === "number") {
           // Stay on the Dashboard — modal overlays over the existing screen.
-          setLimitModal({ limit: data.limit });
+          setBlockedModal({ kind: "limit", limit: data.limit });
           return;
         }
       }
@@ -412,10 +484,10 @@ export default function Home() {
             onSignOut={handleSignOut}
           />
         </ForwardJobsProvider>
-        {limitModal && (
-          <LimitReachedModal
-            limit={limitModal.limit}
-            onClose={() => setLimitModal(null)}
+        {blockedModal && (
+          <AccessBlockedModal
+            payload={blockedModal}
+            onClose={() => setBlockedModal(null)}
           />
         )}
       </>
@@ -425,13 +497,14 @@ export default function Home() {
   // Login
   return (
     <div className="flex min-h-dvh items-center justify-center bg-gradient-to-br from-zinc-50 via-white to-blue-50/30 p-4 sm:p-6 dark:from-zinc-950 dark:via-zinc-950 dark:to-blue-950/10">
-      {/* Defensive: also render the limit modal here in case state lands
-          on the login screen with the modal already set (shouldn't happen
-          after the startAddAccount reorder above, but cheap insurance). */}
-      {limitModal && (
-        <LimitReachedModal
-          limit={limitModal.limit}
-          onClose={() => setLimitModal(null)}
+      {/* Defensive: also render the modal here in case state lands on the
+          login screen with the modal already set. The post-auth identity
+          rejection in handleSignIn actually fires while we're rendering
+          the login screen, so this isn't theoretical. */}
+      {blockedModal && (
+        <AccessBlockedModal
+          payload={blockedModal}
+          onClose={() => setBlockedModal(null)}
         />
       )}
       <div className="w-full max-w-sm">

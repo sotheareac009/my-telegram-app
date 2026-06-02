@@ -42,7 +42,7 @@ export async function POST(request: Request) {
           code: decision.code,
         });
       }
-      await linkCurrentAccount(summary);
+      await linkCurrentAccount(summary, sessionString);
       return Response.json({ valid: true, user: summary });
     }
 

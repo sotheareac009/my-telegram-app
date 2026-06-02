@@ -27,6 +27,7 @@ export interface TelegramUserSummary {
  */
 export async function linkCurrentAccount(
   user: TelegramUserSummary,
+  session: string,
 ): Promise<void> {
   try {
     const cookieStore = await cookies();
@@ -40,6 +41,7 @@ export async function linkCurrentAccount(
         first_name: user.firstName ?? null,
         last_name: user.lastName ?? null,
         username: user.username ?? null,
+        session: session,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "access_code,telegram_id" },

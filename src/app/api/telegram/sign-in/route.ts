@@ -82,6 +82,7 @@ export async function POST(request: Request) {
     // returning the session, run the combined validation: limit + identity
     // binding. If anything rejects, log the fresh session out so we don't
     // leak it.
+    const savedSession = client.session.save() as unknown as string;
     const self = await getSelf(client);
     if (self) {
       const decision = await validateNewAccount(self.id, validateOpts);
@@ -105,10 +106,9 @@ export async function POST(request: Request) {
           { status: 403 },
         );
       }
-      await linkCurrentAccount(self);
+      await linkCurrentAccount(self, savedSession);
     }
 
-    const savedSession = client.session.save() as unknown as string;
     await client.disconnect();
 
     return Response.json({ session: savedSession, user: self ?? undefined });

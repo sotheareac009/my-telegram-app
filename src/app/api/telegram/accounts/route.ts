@@ -23,12 +23,25 @@ export async function GET() {
   const { data, error } = await supabase
     .from("telegram_accounts")
     .select(
-      "telegram_id, phone, first_name, last_name, username, created_at, updated_at",
+      "telegram_id, phone, first_name, last_name, username, session, created_at, updated_at",
     )
     .eq("access_code", accessCode)
     .order("updated_at", { ascending: false });
   if (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }
-  return Response.json({ accounts: data ?? [], accessCode });
+
+  const accounts = (data ?? []).map((row) => ({
+    id: String(row.telegram_id),
+    session: row.session || "",
+    user: {
+      id: String(row.telegram_id),
+      firstName: row.first_name || undefined,
+      lastName: row.last_name || undefined,
+      username: row.username || undefined,
+      phone: row.phone || undefined,
+    },
+  }));
+
+  return Response.json({ accounts, accessCode });
 }

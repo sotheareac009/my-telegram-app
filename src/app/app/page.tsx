@@ -47,23 +47,26 @@ function readStoredAccounts(accessCode?: string): TelegramAccount[] {
 }
 
 function writeStoredAccounts(accounts: TelegramAccount[], currentId = "", accessCode?: string) {
-  const key = accessCode ? `telegram_accounts_${accessCode}` : ACCOUNTS_KEY;
-  localStorage.setItem(key, JSON.stringify(accounts));
-
+  // We no longer write the accounts list or raw sessions to localstorage!
+  // We only keep the active account ID preference as device-specific UI state.
   const currentAccountKey = accessCode ? `telegram_current_account_id_${accessCode}` : CURRENT_ACCOUNT_KEY;
-  const legacySessionKey = accessCode ? `telegram_session_${accessCode}` : LEGACY_SESSION_KEY;
 
-  if (currentId) {
-    const current = accounts.find((account) => account.id === currentId);
-    localStorage.setItem(currentAccountKey, currentId);
-    if (current) {
-      localStorage.setItem(legacySessionKey, current.session);
+  if (typeof window !== "undefined") {
+    // Clean up any legacy accounts list or flat session keys for this access code
+    if (accessCode) {
+      localStorage.removeItem(`telegram_accounts_${accessCode}`);
+      localStorage.removeItem(`telegram_session_${accessCode}`);
     }
-    return;
-  }
+    localStorage.removeItem(ACCOUNTS_KEY);
+    localStorage.removeItem(LEGACY_SESSION_KEY);
 
-  localStorage.removeItem(currentAccountKey);
-  localStorage.removeItem(legacySessionKey);
+    if (currentId) {
+      localStorage.setItem(currentAccountKey, currentId);
+      return;
+    }
+
+    localStorage.removeItem(currentAccountKey);
+  }
 }
 
 /**
@@ -240,41 +243,46 @@ export default function Home() {
         const accessCode = accountsData.accessCode || "";
         setActiveAccessCode(accessCode);
 
-        const serverLinkedIds = new Set(
-          (accountsData.accounts ?? []).map((acc: any) => String(acc.telegram_id))
-        );
+        // Server-returned accounts
+        const serverAccounts: TelegramAccount[] = accountsData.accounts ?? [];
 
-        // Read stored accounts from access-code-specific key
-        let savedAccounts = readStoredAccounts(accessCode);
+        // Read stored accounts from access-code-specific or legacy keys for session migration
+        let localAccounts = readStoredAccounts(accessCode);
+        if (localAccounts.length === 0) {
+          localAccounts = readStoredAccounts();
+        }
 
-        // Backward compatibility migration:
-        // If the access-code-specific list is empty, read the old flat key,
-        // migrate matching accounts, and clean them from the flat list.
-        if (savedAccounts.length === 0) {
-          const legacyAccounts = readStoredAccounts();
-          savedAccounts = legacyAccounts.filter((acc) =>
-            serverLinkedIds.has(String(acc.user.id))
-          );
-          if (savedAccounts.length > 0) {
-            writeStoredAccounts(savedAccounts, savedAccounts[0].id, accessCode);
-            const remainingLegacy = legacyAccounts.filter(
-              (acc) => !serverLinkedIds.has(String(acc.user.id))
-            );
-            localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(remainingLegacy));
+        // Map of telegram_id -> session from local storage
+        const localSessionMap = new Map<string, string>();
+        for (const acc of localAccounts) {
+          if (acc.session) {
+            localSessionMap.set(String(acc.id), acc.session);
           }
         }
 
-        // Just in case, filter savedAccounts to be 100% in sync with the active code
-        const filteredAccounts = savedAccounts.filter((account) =>
-          serverLinkedIds.has(String(account.user.id))
-        );
+        // Build the combined list of accounts:
+        // Use server accounts as the source of truth, but if a session is missing on the server,
+        // fall back to the session from local storage.
+        const mergedAccounts = serverAccounts.map((acc) => {
+          const localSession = localSessionMap.get(String(acc.id));
+          return {
+            ...acc,
+            session: acc.session || localSession || "",
+          };
+        });
 
-        if (filteredAccounts.length !== savedAccounts.length) {
-          writeStoredAccounts(filteredAccounts, "", accessCode);
-        }
+        // If there's a session we retrieved from local storage that the server didn't have,
+        // we trigger a check-session to backfill it in the DB.
+        mergedAccounts.forEach((acc) => {
+          const serverAcc = serverAccounts.find((s) => String(s.id) === String(acc.id));
+          if (acc.session && (!serverAcc || !serverAcc.session)) {
+            // Trigger checkSession in background to save the session to the DB
+            void validateSession(acc.session).catch(() => {});
+          }
+        });
 
         // Update state with clean list
-        setAccounts(filteredAccounts);
+        setAccounts(mergedAccounts);
 
         // Select the current account to initialize
         const currentAccountKey = accessCode
@@ -285,7 +293,7 @@ export default function Home() {
         // Migration of active account ID from old flat key
         if (!savedCurrentId && accessCode) {
           const oldCurrentId = localStorage.getItem(CURRENT_ACCOUNT_KEY) || "";
-          if (oldCurrentId && filteredAccounts.some((acc) => acc.id === oldCurrentId)) {
+          if (oldCurrentId && mergedAccounts.some((acc) => acc.id === oldCurrentId)) {
             savedCurrentId = oldCurrentId;
             localStorage.setItem(currentAccountKey, oldCurrentId);
             localStorage.removeItem(CURRENT_ACCOUNT_KEY);
@@ -293,39 +301,41 @@ export default function Home() {
         }
 
         const selectedAccount =
-          filteredAccounts.find((account) => account.id === savedCurrentId) ??
-          filteredAccounts[0];
+          mergedAccounts.find((account) => account.id === savedCurrentId) ??
+          mergedAccounts[0];
 
-        if (selectedAccount) {
+        if (selectedAccount && selectedAccount.session) {
           void checkSession(selectedAccount.session, {
             accountId: selectedAccount.id,
-            preserveAccounts: filteredAccounts,
+            preserveAccounts: mergedAccounts,
             accessCode,
           });
           return;
         }
 
-        // Check legacy session
-        const legacySessionKey = accessCode
-          ? `telegram_session_${accessCode}`
-          : LEGACY_SESSION_KEY;
-        let legacySession = localStorage.getItem(legacySessionKey);
+        // Check legacy session if no accounts are loaded yet
+        if (mergedAccounts.length === 0) {
+          const legacySessionKey = accessCode
+            ? `telegram_session_${accessCode}`
+            : LEGACY_SESSION_KEY;
+          let legacySession = localStorage.getItem(legacySessionKey);
 
-        // Migration of legacy session from old flat key
-        if (!legacySession && accessCode) {
-          const oldLegacySession = localStorage.getItem(LEGACY_SESSION_KEY);
-          if (oldLegacySession) {
-            legacySession = oldLegacySession;
-            localStorage.setItem(legacySessionKey, oldLegacySession);
-            localStorage.removeItem(LEGACY_SESSION_KEY);
+          // Migration of legacy session from old flat key
+          if (!legacySession && accessCode) {
+            const oldLegacySession = localStorage.getItem(LEGACY_SESSION_KEY);
+            if (oldLegacySession) {
+              legacySession = oldLegacySession;
+              localStorage.setItem(legacySessionKey, oldLegacySession);
+              localStorage.removeItem(LEGACY_SESSION_KEY);
+            }
           }
-        }
-        if (legacySession) {
-          void checkSession(legacySession, {
-            preserveAccounts: filteredAccounts,
-            accessCode,
-          });
-          return;
+          if (legacySession) {
+            void checkSession(legacySession, {
+              preserveAccounts: mergedAccounts,
+              accessCode,
+            });
+            return;
+          }
         }
 
         setChecking(false);

@@ -14,6 +14,7 @@ interface AccessCode {
   phone_number: string;
   /** Max Telegram accounts this code can link; null = unlimited. */
   account_limit: number | null;
+  linked_accounts_count: number;
 }
 
 export default function AdminDashboard() {
@@ -30,8 +31,14 @@ export default function AdminDashboard() {
   const [formPhone, setFormPhone] = useState("");
   /** Empty string = unlimited; otherwise the cap as a string of digits. */
   const [formAccountLimit, setFormAccountLimit] = useState("");
+  const [formCustomCode, setFormCustomCode] = useState("");
   const [generating, setGenerating] = useState(false);
   const [formError, setFormError] = useState("");
+  const [warningDialog, setWarningDialog] = useState<{
+    show: boolean;
+    title: string;
+    message: string;
+  }>({ show: false, title: "", message: "" });
 
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -108,6 +115,7 @@ export default function AdminDashboard() {
     setFormLastName("");
     setFormPhone("");
     setFormAccountLimit("");
+    setFormCustomCode("");
     setFormError("");
     setShowGenerateModal(true);
   }
@@ -120,6 +128,7 @@ export default function AdminDashboard() {
     setFormAccountLimit(
       code.account_limit != null ? String(code.account_limit) : "",
     );
+    setFormCustomCode("");
     setFormError("");
     setShowGenerateModal(true);
   }
@@ -136,6 +145,28 @@ export default function AdminDashboard() {
     setGenerating(true);
     try {
       const isEdit = editingId !== null;
+      const currentCode = isEdit ? codes.find((c) => c.id === editingId) : null;
+
+      if (isEdit && currentCode) {
+        let newLimitVal: number | null = null;
+        if (formAccountLimit.trim() !== "") {
+          const n = Number(formAccountLimit.trim());
+          if (!Number.isNaN(n) && Number.isFinite(n)) {
+            newLimitVal = n;
+          }
+        }
+
+        if (newLimitVal !== null && newLimitVal < currentCode.linked_accounts_count) {
+          setGenerating(false);
+          setWarningDialog({
+            show: true,
+            title: "Cannot Lower Limit",
+            message: `This access code currently has ${currentCode.linked_accounts_count} linked Telegram accounts, which is more than the new limit (${newLimitVal}). Please tell the user to log out of their existing Telegram accounts first to make this change.`,
+          });
+          return;
+        }
+      }
+
       const res = await fetch("/api/admin/codes", {
         method: isEdit ? "PATCH" : "POST",
         headers: {
@@ -143,7 +174,7 @@ export default function AdminDashboard() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          ...(isEdit ? { id: editingId } : {}),
+          ...(isEdit ? { id: editingId } : { code: formCustomCode }),
           first_name: formFirstName,
           last_name: formLastName,
           phone_number: formPhone,
@@ -382,15 +413,20 @@ export default function AdminDashboard() {
                       {code.phone_number || <span className="text-zinc-400">—</span>}
                     </td>
                     <td className="px-6 py-4 text-zinc-700 dark:text-zinc-300">
-                      {code.account_limit != null ? (
-                        <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-600/10 dark:bg-blue-400/10 dark:text-blue-400 dark:ring-blue-400/20">
-                          {code.account_limit} account{code.account_limit === 1 ? "" : "s"}
+                      <div className="flex flex-col gap-1">
+                        <span className="text-xs text-zinc-500 font-medium">
+                          {code.linked_accounts_count} linked
                         </span>
-                      ) : (
-                        <span className="inline-flex items-center rounded-md bg-zinc-50 px-2 py-1 text-xs font-medium text-zinc-600 ring-1 ring-inset ring-zinc-500/10 dark:bg-zinc-400/10 dark:text-zinc-400 dark:ring-zinc-400/20">
-                          Unlimited
-                        </span>
-                      )}
+                        {code.account_limit != null ? (
+                          <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700 ring-1 ring-inset ring-blue-600/10 dark:bg-blue-400/10 dark:text-blue-400 dark:ring-blue-400/20 w-fit">
+                            Limit: {code.account_limit}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-md bg-zinc-50 px-2 py-0.5 text-[11px] font-medium text-zinc-600 ring-1 ring-inset ring-zinc-500/10 dark:bg-zinc-400/10 dark:text-zinc-400 dark:ring-zinc-400/20 w-fit">
+                            Unlimited
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-zinc-500">
                       {new Date(code.created_at).toLocaleDateString()}
@@ -493,6 +529,29 @@ export default function AdminDashboard() {
               </button>
             </div>
 
+            {!editingId && (
+              <div className="mb-3">
+                <label className="mb-1.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                  Custom Access Code Suffix (Optional)
+                </label>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-mono font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 select-none">
+                    VIP-
+                  </span>
+                  <input
+                    type="text"
+                    value={formCustomCode}
+                    onChange={(e) => setFormCustomCode(e.target.value.replace(/[^A-Za-z0-9_-]/g, "").toUpperCase())}
+                    placeholder="Auto-generated if empty"
+                    className="flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white font-mono uppercase"
+                  />
+                </div>
+                <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500">
+                  Only letters, numbers, dashes (-), and underscores (_) are allowed.
+                </p>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
@@ -577,6 +636,37 @@ export default function AdminDashboard() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {warningDialog.show && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-50 dark:bg-amber-950/30 text-amber-500 shadow-sm">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+            </div>
+            
+            <h3 className="text-lg font-bold text-zinc-900 dark:text-white mb-2">
+              {warningDialog.title}
+            </h3>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-6 leading-relaxed">
+              {warningDialog.message}
+            </p>
+            
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setWarningDialog({ show: false, title: "", message: "" })}
+                className="rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-zinc-850 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              >
+                Got it
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

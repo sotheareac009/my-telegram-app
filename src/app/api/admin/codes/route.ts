@@ -49,8 +49,36 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  const codesWithCounts = [];
+  if (data && data.length > 0) {
+    const codesList = data.map((c) => c.code);
+    const { data: accountsData } = await supabase
+      .from('telegram_accounts')
+      .select('access_code')
+      .in('access_code', codesList);
+
+    const countMap: Record<string, number> = {};
+    for (const code of codesList) {
+      countMap[code] = 0;
+    }
+    if (accountsData) {
+      for (const row of accountsData) {
+        if (row.access_code) {
+          countMap[row.access_code] = (countMap[row.access_code] || 0) + 1;
+        }
+      }
+    }
+
+    for (const c of data) {
+      codesWithCounts.push({
+        ...c,
+        linked_accounts_count: countMap[c.code] ?? 0,
+      });
+    }
+  }
+
   return NextResponse.json({
-    data: data ?? [],
+    data: codesWithCounts,
     total: count ?? 0,
     page,
     pageSize,
@@ -67,6 +95,8 @@ export async function POST(request: Request) {
   const firstName = typeof body.first_name === 'string' ? body.first_name.trim() : '';
   const lastName = typeof body.last_name === 'string' ? body.last_name.trim() : '';
   const phoneNumber = typeof body.phone_number === 'string' ? body.phone_number.trim() : '';
+  const customCode = typeof body.code === 'string' ? body.code.trim() : '';
+
   // Optional cap on how many Telegram accounts this code may link. Null /
   // missing / non-positive is treated as unlimited.
   let accountLimit: number | null = null;
@@ -85,17 +115,41 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Phone number is required' }, { status: 400 });
   }
 
-  // Generate a random 8-character code
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let randomCode = '';
-  for (let i = 0; i < 8; i++) {
-    randomCode += chars.charAt(Math.floor(Math.random() * chars.length));
+  let finalCode = '';
+  if (customCode) {
+    const sanitized = customCode.replace(/[^A-Za-z0-9_-]/g, '').toUpperCase();
+    if (!sanitized) {
+      return NextResponse.json({ error: 'Custom code contains invalid characters' }, { status: 400 });
+    }
+    finalCode = `VIP-${sanitized}`;
+  } else {
+    // Generate a random 8-character code
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let randomCode = '';
+    for (let i = 0; i < 8; i++) {
+      randomCode += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    finalCode = `VIP-${randomCode}`;
+  }
+
+  // Check if code already exists to show a clean error message
+  const { data: existingCode } = await supabase
+    .from('access_codes')
+    .select('code')
+    .eq('code', finalCode)
+    .maybeSingle();
+
+  if (existingCode) {
+    return NextResponse.json(
+      { error: `Access code "${finalCode}" already exists.` },
+      { status: 400 },
+    );
   }
 
   const { data, error } = await supabase
     .from('access_codes')
     .insert([{
-      code: `VIP-${randomCode}`,
+      code: finalCode,
       is_active: true,
       first_name: firstName || null,
       last_name: lastName || null,
@@ -109,7 +163,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json(data);
+  return NextResponse.json({ ...data, linked_accounts_count: 0 });
 }
 
 // PATCH to update status and/or user details
@@ -195,7 +249,16 @@ export async function PATCH(request: Request) {
       trimmed = await trimAccountsToLimit(data.code, data.account_limit);
     }
 
-    return NextResponse.json({ ...data, trimmed });
+    const { count: currentCount } = await supabase
+      .from('telegram_accounts')
+      .select('*', { count: 'exact', head: true })
+      .eq('access_code', data.code);
+
+    return NextResponse.json({
+      ...data,
+      trimmed,
+      linked_accounts_count: currentCount ?? 0,
+    });
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }

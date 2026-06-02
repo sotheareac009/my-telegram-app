@@ -23,6 +23,13 @@ export async function POST(request: Request) {
     await client.invoke(new Api.auth.LogOut());
     await client.disconnect();
 
+    // Clear the active session in the database so it's no longer tracked as active
+    const { supabase } = await import("@/lib/supabase");
+    await supabase
+      .from("telegram_accounts")
+      .update({ session: null })
+      .eq("session", sessionString);
+
     // NOTE: we intentionally do NOT delete the (access_code, telegram_id)
     // row from telegram_accounts here. The row IS the identity binding —
     // deleting it would clear the binding and let any other Telegram

@@ -71,6 +71,9 @@ interface HeaderProps {
   onSwitchAccount: (accountId: string) => void;
   onAddAccount: () => void;
   onSignOut: () => void;
+  /** Permanently unlink a Telegram account from the current access code
+   * (LogOut + delete the link row). Frees the slot for a new account. */
+  onRemoveAccount: (accountId: string) => void;
   onLogoutAccessCode: () => void;
 }
 
@@ -163,6 +166,7 @@ export default function Header({
   onSwitchAccount,
   onAddAccount,
   onSignOut,
+  onRemoveAccount,
   onLogoutAccessCode,
 }: HeaderProps) {
   const [open, setOpen] = useState(false);
@@ -425,30 +429,71 @@ export default function Header({
                     {accounts.map((account) => {
                       const isCurrent = account.id === currentAccountId;
                       return (
-                        <button
+                        <div
                           key={account.id}
-                          type="button"
-                          onClick={() => {
-                            setOpen(false);
-                            onSwitchAccount(account.id);
-                          }}
-                          className={`cursor-pointer flex w-full min-w-0 items-center gap-2.5 rounded-xl px-3 py-2 text-left transition-colors ${isCurrent ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800/60"}`}
+                          className={`group relative flex w-full min-w-0 items-center rounded-xl pr-1 transition-colors ${isCurrent ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800/60"}`}
                         >
-                          <AccountAvatar account={account} />
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-[13px] font-medium">
-                              {getDisplayName(account.user)}
-                            </p>
-                            {account.user.username && (
-                              <p className="truncate text-xs text-zinc-400">
-                                @{account.user.username}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpen(false);
+                              onSwitchAccount(account.id);
+                            }}
+                            className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2 text-left"
+                          >
+                            <AccountAvatar account={account} />
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-[13px] font-medium">
+                                {getDisplayName(account.user)}
                               </p>
+                              {account.user.username && (
+                                <p className="truncate text-xs text-zinc-400">
+                                  @{account.user.username}
+                                </p>
+                              )}
+                            </div>
+                            {isCurrent && (
+                              <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" />
                             )}
-                          </div>
-                          {isCurrent && (
-                            <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" />
-                          )}
-                        </button>
+                          </button>
+                          {/* Unlink from access code — invalidates the
+                              Telegram session AND removes the link row so
+                              the slot is freed up for someone else.
+                              Always rendered; the handler takes care of
+                              the live-session case by either auto-switching
+                              to another account (if any) or navigating to
+                              the phone-login form (if this was the last
+                              one) BEFORE the API call tears the session
+                              down. */}
+                          <button
+                            type="button"
+                            title="Remove from access code"
+                            aria-label={`Remove ${getDisplayName(account.user)} from this access code`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpen(false);
+                              onRemoveAccount(account.id);
+                            }}
+                            className="ml-1 flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-zinc-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 focus:opacity-100 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                          >
+                            <svg
+                              width="14"
+                              height="14"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                              <path d="M10 11v6" />
+                              <path d="M14 11v6" />
+                              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                            </svg>
+                          </button>
+                        </div>
                       );
                     })}
                   </div>

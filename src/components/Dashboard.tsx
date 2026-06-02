@@ -154,6 +154,9 @@ interface DashboardProps {
   onSwitchAccount: (accountId: string) => void;
   onAddAccount: () => void;
   onSignOut: () => void;
+  /** Permanently unlink a Telegram account from the current access code
+   * (LogOut + delete the link row). Frees the slot for a new account. */
+  onRemoveAccount: (accountId: string) => void;
   onLogoutAccessCode: () => void;
 }
 
@@ -165,6 +168,7 @@ export default function Dashboard({
   onSwitchAccount,
   onAddAccount,
   onSignOut,
+  onRemoveAccount,
   onLogoutAccessCode,
 }: DashboardProps) {
   const [collapsed, setCollapsed] = useState(false);
@@ -592,6 +596,7 @@ export default function Dashboard({
           onSwitchAccount={handleSwitchAccount}
           onAddAccount={onAddAccount}
           onSignOut={onSignOut}
+          onRemoveAccount={onRemoveAccount}
           onLogoutAccessCode={onLogoutAccessCode}
         />
         <div className="flex min-h-0 flex-1 overflow-hidden">

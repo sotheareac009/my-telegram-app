@@ -203,6 +203,119 @@ function AccessBlockedModal({
   );
 }
 
+/**
+ * Premium-styled confirmation modal for removing a Telegram account from
+ * the current access code. Matches the `AccessBlockedModal` treatment but
+ * with destructive red gradient and a trash-icon badge so the user
+ * registers it as a destructive action.
+ */
+function RemoveAccountModal({
+  accountName,
+  willPushToLogin,
+  loading,
+  onCancel,
+  onConfirm,
+}: {
+  accountName: string;
+  /** True when this is the last linked account — the handler will land the
+   * user on the phone-login form after removal. */
+  willPushToLogin: boolean;
+  loading: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && !loading) onCancel();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel, loading]);
+
+  return (
+    <div
+      onClick={loading ? undefined : onCancel}
+      className="fixed inset-0 z-[200] flex items-end justify-center bg-zinc-950/55 px-4 pb-8 pt-16 backdrop-blur-md sm:items-center sm:p-6"
+      role="alertdialog"
+      aria-modal="true"
+      aria-label="Remove account"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative w-full max-w-sm overflow-hidden rounded-3xl border border-white/10 bg-white/95 shadow-2xl shadow-zinc-900/30 backdrop-blur-xl dark:border-white/5 dark:bg-zinc-900/95"
+      >
+        {/* Decorative red tint strip */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-red-500/15 via-rose-500/10 to-transparent" />
+
+        {/* Trash icon badge */}
+        <div className="relative flex justify-center pt-7">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-red-500 to-rose-600 shadow-lg shadow-red-500/30 ring-4 ring-white/80 dark:ring-zinc-900/80">
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+              <path d="M10 11v6" />
+              <path d="M14 11v6" />
+              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+            </svg>
+          </div>
+        </div>
+
+        <div className="relative px-6 pb-6 pt-4 text-center">
+          <h2 className="text-[17px] font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+            Remove account?
+          </h2>
+          <p className="mt-2 text-[13.5px] leading-relaxed text-zinc-600 dark:text-zinc-400">
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+              {accountName}
+            </span>{" "}
+            will be signed out of Telegram and unlinked from this access code.
+          </p>
+          <p className="mt-1 text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-500">
+            {willPushToLogin
+              ? "You'll be returned to the sign-in screen to add a different Telegram account."
+              : "You'll stay signed in to your other accounts."}
+          </p>
+
+          <div className="mt-5 flex gap-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={loading}
+              className="flex-1 rounded-xl bg-zinc-100 px-4 py-2.5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200 active:scale-[0.98] disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={loading}
+              className="flex flex-1 items-center justify-center rounded-xl bg-gradient-to-br from-red-500 to-rose-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-red-500/30 transition hover:opacity-90 active:scale-[0.98] disabled:opacity-60"
+            >
+              {loading ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  Removing…
+                </span>
+              ) : (
+                "Remove"
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [step, setStep] = useState<Step>("phone");
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -227,6 +340,18 @@ export default function Home() {
   const [blockedModal, setBlockedModal] = useState<AccessBlockedKind | null>(
     null,
   );
+  /** Premium remove-confirm dialog state. Null = hidden. */
+  const [removeConfirm, setRemoveConfirm] = useState<
+    | {
+        accountId: string;
+        name: string;
+        /** True when removing this account will land on the phone-login
+         * form afterwards (it's the last linked account). */
+        willPushToLogin: boolean;
+      }
+    | null
+  >(null);
+  const [removing, setRemoving] = useState(false);
 
   useEffect(() => {
     async function initSession() {
@@ -531,6 +656,113 @@ export default function Home() {
     }
   }
 
+  /**
+   * Permanently remove a linked Telegram account from this access code.
+   * Calls the dedicated `accounts/remove` endpoint which both invalidates
+   * the Telegram session (auth.LogOut) and deletes the link row.
+   *
+   * Differs from handleSignOut in two ways:
+   *   1. It can target any account, not just the currently active one.
+   *   2. It frees the slot — useful when the user wants to hand the
+   *      access code over to a different Telegram account.
+   */
+  /** Opens the premium remove-confirm modal for the given account. */
+  function handleRemoveAccount(accountId: string) {
+    const account = accounts.find((a) => a.id === accountId);
+    if (!account) return;
+    const name =
+      [account.user.firstName, account.user.lastName]
+        .filter(Boolean)
+        .join(" ") ||
+      account.user.username ||
+      account.user.phone ||
+      "this account";
+    const isRemovingCurrent = accountId === currentAccountId;
+    const isLastAccount = accounts.length === 1;
+    setRemoveConfirm({
+      accountId,
+      name,
+      willPushToLogin: isRemovingCurrent && isLastAccount,
+    });
+  }
+
+  /** Actually performs the removal after the modal confirmation. */
+  async function confirmRemoveAccount() {
+    if (!removeConfirm) return;
+    const { accountId } = removeConfirm;
+    const account = accounts.find((a) => a.id === accountId);
+    if (!account) {
+      setRemoveConfirm(null);
+      return;
+    }
+
+    const isRemovingCurrent = accountId === currentAccountId;
+    const nextAccounts = accounts.filter((a) => a.id !== accountId);
+    // Pre-pick the account we'd auto-switch to (if any) so we can install
+    // it BEFORE the API call. The Dashboard re-mounts cleanly via its
+    // `key={currentAccountId}` so polls/streams cut over to the new
+    // session before the old one gets logged out by the server.
+    const fallbackAccount = isRemovingCurrent ? nextAccounts[0] : null;
+
+    if (isRemovingCurrent) {
+      if (fallbackAccount) {
+        // Auto-switch to another account. Dashboard re-keys on
+        // currentAccountId so this remounts the tree on the new session.
+        setUser(fallbackAccount.user);
+        setSessionString(fallbackAccount.session);
+        setCurrentAccountId(fallbackAccount.id);
+        setStep("done");
+      } else {
+        // Last account — unmount Dashboard and land on the phone form.
+        setUser(null);
+        setSessionString("");
+        setCurrentAccountId("");
+        setPhoneNumber("");
+        setPhoneCode("");
+        setPhoneCodeHash("");
+        setPassword("");
+        setIsAddingAccount(false);
+        setStep("phone");
+      }
+    }
+
+    setRemoving(true);
+    try {
+      const res = await fetch("/api/telegram/accounts/remove", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ telegramId: accountId }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        error?: string;
+      };
+      if (!res.ok || data.error) {
+        setError(data.error || "Failed to remove account");
+        return;
+      }
+
+      setAccounts(nextAccounts);
+
+      // Persist the trimmed list with the right "current" pointer.
+      if (isRemovingCurrent) {
+        writeStoredAccounts(
+          nextAccounts,
+          fallbackAccount ? fallbackAccount.id : "",
+          activeAccessCode,
+        );
+      } else {
+        // Still on the current account — just persist the trimmed list.
+        writeStoredAccounts(nextAccounts, currentAccountId, activeAccessCode);
+      }
+    } catch {
+      setError("Failed to remove account");
+    } finally {
+      setRemoving(false);
+      setRemoveConfirm(null);
+    }
+  }
+
   async function handleLogoutAccessCode() {
     setLoading(true);
     try {
@@ -636,6 +868,7 @@ export default function Home() {
             onSwitchAccount={handleSwitchAccount}
             onAddAccount={startAddAccount}
             onSignOut={handleSignOut}
+            onRemoveAccount={handleRemoveAccount}
             onLogoutAccessCode={handleLogoutAccessCode}
           />
         </ForwardJobsProvider>
@@ -643,6 +876,17 @@ export default function Home() {
           <AccessBlockedModal
             payload={blockedModal}
             onClose={() => setBlockedModal(null)}
+          />
+        )}
+        {removeConfirm && (
+          <RemoveAccountModal
+            accountName={removeConfirm.name}
+            willPushToLogin={removeConfirm.willPushToLogin}
+            loading={removing}
+            onCancel={() => {
+              if (!removing) setRemoveConfirm(null);
+            }}
+            onConfirm={confirmRemoveAccount}
           />
         )}
       </>
@@ -655,11 +899,24 @@ export default function Home() {
       {/* Defensive: also render the modal here in case state lands on the
           login screen with the modal already set. The post-auth identity
           rejection in handleSignIn actually fires while we're rendering
-          the login screen, so this isn't theoretical. */}
+          the login screen, so this isn't theoretical. Same idea for the
+          remove-confirm dialog — when removing the last account, the
+          unmount-then-API flow puts us here while the modal is still up. */}
       {blockedModal && (
         <AccessBlockedModal
           payload={blockedModal}
           onClose={() => setBlockedModal(null)}
+        />
+      )}
+      {removeConfirm && (
+        <RemoveAccountModal
+          accountName={removeConfirm.name}
+          willPushToLogin={removeConfirm.willPushToLogin}
+          loading={removing}
+          onCancel={() => {
+            if (!removing) setRemoveConfirm(null);
+          }}
+          onConfirm={confirmRemoveAccount}
         />
       )}
       <div className="w-full max-w-sm">

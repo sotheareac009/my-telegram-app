@@ -117,6 +117,13 @@ export type ChatMessage = {
   entities?: TextEntity[];
   /** Emoji reactions accumulated on this message, when any exist. */
   reactions?: MessageReaction[];
+  /** Phone call information (for MessageService calls). */
+  phoneCall?: {
+    duration?: number;
+    video?: boolean;
+    reason?: "missed" | "disconnect" | "hangup" | "busy";
+    isOutgoing: boolean;
+  };
 };
 
 /** Decode a Telegram stripped thumbnail into an inline JPEG data URL. */
@@ -420,29 +427,54 @@ function mapMessage(
   readOutboxMaxId: number,
   isGroup: boolean,
 ): ChatMessage | null {
-  if (!(msg instanceof Api.Message)) return null;
-  const text: string = msg.message || "";
+  const isMessage = msg instanceof Api.Message;
+  const isMessageService = msg instanceof Api.MessageService;
+  
+  if (!isMessage && !isMessageService) return null;
+
+  let phoneCall: ChatMessage["phoneCall"] | undefined;
+  if (isMessageService) {
+    if (msg.action instanceof Api.MessageActionPhoneCall) {
+      let reasonStr: "missed" | "disconnect" | "hangup" | "busy" = "hangup";
+      if (msg.action.reason instanceof Api.PhoneCallDiscardReasonMissed) {
+        reasonStr = "missed";
+      } else if (msg.action.reason instanceof Api.PhoneCallDiscardReasonDisconnect) {
+        reasonStr = "disconnect";
+      } else if (msg.action.reason instanceof Api.PhoneCallDiscardReasonBusy) {
+        reasonStr = "busy";
+      }
+      phoneCall = {
+        duration: msg.action.duration,
+        video: msg.action.video,
+        reason: reasonStr,
+        isOutgoing: Boolean(msg.out),
+      };
+    } else {
+      return null;
+    }
+  }
+
+  const text: string = isMessageService ? "" : (msg.message || "");
   const fromMe = Boolean(msg.out);
-  const media = msg.media ? classifyMedia(msg.media) : null;
-  const linkPreview = msg.media ? extractLinkPreview(msg.media) : null;
-  // Sender labelling is only relevant for group/channel streams.
-  const sender = isGroup && !fromMe ? extractSender(msg) : {};
+  const media = (!isMessageService && msg.media) ? classifyMedia(msg.media) : null;
+  const linkPreview = (!isMessageService && msg.media) ? extractLinkPreview(msg.media) : null;
+  const sender = (isGroup && !fromMe && !isMessageService) ? extractSender(msg) : {};
+
   return {
     id: msg.id,
     text,
     date: msg.date,
     fromMe,
-    // Outgoing messages the peer has already read are "seen" — Telegram tracks
-    // this per-dialog via readOutboxMaxId, not per-message.
     status: fromMe ? (msg.id <= readOutboxMaxId ? "read" : "sent") : undefined,
     media: media ?? undefined,
-    groupedId: msg.groupedId ? msg.groupedId.toString() : undefined,
+    groupedId: (!isMessageService && msg.groupedId) ? msg.groupedId.toString() : undefined,
     senderId: sender.id,
     senderName: sender.name,
-    forwardedFrom: extractForward(msg),
+    forwardedFrom: isMessageService ? undefined : extractForward(msg),
     linkPreview: linkPreview ?? undefined,
-    entities: extractCodeEntities(msg),
-    reactions: extractReactions(msg),
+    entities: isMessageService ? undefined : extractCodeEntities(msg),
+    reactions: isMessageService ? undefined : extractReactions(msg),
+    phoneCall,
   };
 }
 

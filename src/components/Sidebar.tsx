@@ -23,27 +23,19 @@ const menuItems = [
     ),
   },
   {
-    id: "groups",
-    label: "Groups",
+    id: "groups-channels",
+    label: "Group and Channel",
+    /** Used in the mobile bottom nav where labels are tight. */
+    mobileLabel: "Groups",
     icon: (
+      // People + broadcast bars combined glyph — signals both groups
+      // (chats) and channels (broadcast feeds) in one mark.
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-      </svg>
-    ),
-  },
-  {
-    id: "channels",
-    label: "Channels",
-    icon: (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M2 20h.01" />
-        <path d="M7 20v-4" />
-        <path d="M12 20v-8" />
-        <path d="M17 20V8" />
-        <path d="M22 4v16" />
+        <path d="M14 17v-2a3 3 0 0 0-3-3H5a3 3 0 0 0-3 3v2" />
+        <circle cx="8" cy="7" r="3" />
+        <line x1="18" y1="14" x2="18" y2="20" />
+        <line x1="21" y1="11" x2="21" y2="20" />
+        <line x1="15" y1="17" x2="15" y2="20" />
       </svg>
     ),
   },
@@ -114,10 +106,10 @@ export default function Sidebar({
   // lists — surfacing an unread tally there isn't actionable).
   function badgeFor(id: string): number {
     switch (id) {
-      case "groups":
-        return unread.groups;
-      case "channels":
-        return unread.channels;
+      case "groups-channels":
+        // Merged view — sum unread across both buckets so the badge
+        // reflects the combined inbox.
+        return unread.groups + unread.channels;
       case "recent-chats":
         return unread.users;
       case "queue":

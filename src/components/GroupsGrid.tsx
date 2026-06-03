@@ -31,7 +31,9 @@ export interface ChatFolder {
 
 interface GroupsGridProps {
   session: string;
-  type: "groups" | "channels";
+  /** "all" merges both buckets into one list — used by the unified
+   * "Group and Channel" sidebar item. */
+  type: "groups" | "channels" | "all";
   activeFolderId: string;
   onActiveFolderChange: (folderId: string) => void;
   onGroupSelect: (group: GroupInfo) => void;
@@ -165,9 +167,14 @@ export default function GroupsGrid({
     return () => { cancelled = true; };
   }, [session, folders, groups, onFoldersLoaded, onGroupsLoaded]);
 
-  const typedGroups = (groups ?? []).filter((g) =>
-    type === "channels" ? g.isChannel && !g.isGroup : g.isGroup
-  );
+  const typedGroups = (groups ?? []).filter((g) => {
+    if (type === "all") {
+      // Merged view — include both megagroups (isGroup) AND broadcast
+      // channels (isChannel && !isGroup). Excludes 1-to-1 user DMs.
+      return g.isGroup || (g.isChannel && !g.isGroup);
+    }
+    return type === "channels" ? g.isChannel && !g.isGroup : g.isGroup;
+  });
   const visibleFolders = (folders ?? []).filter((folder) =>
     typedGroups.some((group) => group.folderIds.includes(folder.id))
   );
@@ -184,7 +191,12 @@ export default function GroupsGrid({
   const totalPages = Math.ceil(filtered.length / perPage);
   const currentPage = Math.min(page, Math.max(totalPages, 1));
   const paginated = filtered.slice((currentPage - 1) * perPage, currentPage * perPage);
-  const title = type === "channels" ? "Channels" : "Groups";
+  const title =
+    type === "all"
+      ? "Group and Channel"
+      : type === "channels"
+        ? "Channels"
+        : "Groups";
 
   return (
     <div className="flex h-full flex-col">

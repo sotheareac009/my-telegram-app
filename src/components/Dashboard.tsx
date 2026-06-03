@@ -79,8 +79,16 @@ function readStoredActiveMenu(): string {
   return "home";
 }
 
-type FolderByType = { groups: string; channels: string };
-type PageByType = { groups: number; channels: number };
+type FolderByType = {
+  groups: string;
+  channels: string;
+  "groups-channels": string;
+};
+type PageByType = {
+  groups: number;
+  channels: number;
+  "groups-channels": number;
+};
 
 function readStoredJSON<T>(
   key: string,
@@ -100,23 +108,34 @@ function readStoredJSON<T>(
 }
 
 function isFolderByType(v: unknown): v is FolderByType {
-  return (
-    typeof v === "object" &&
-    v !== null &&
-    typeof (v as FolderByType).groups === "string" &&
-    typeof (v as FolderByType).channels === "string"
-  );
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Partial<FolderByType>;
+  // Older stored records may not have the merged key yet — accept them and
+  // default the missing field at use time.
+  if (typeof o.groups !== "string" || typeof o.channels !== "string") {
+    return false;
+  }
+  if (typeof o["groups-channels"] !== "string") {
+    (o as FolderByType)["groups-channels"] = "all";
+  }
+  return true;
 }
 
 function isPageByType(v: unknown): v is PageByType {
-  return (
-    typeof v === "object" &&
-    v !== null &&
-    Number.isFinite((v as PageByType).groups) &&
-    Number.isFinite((v as PageByType).channels) &&
-    (v as PageByType).groups >= 1 &&
-    (v as PageByType).channels >= 1
-  );
+  if (typeof v !== "object" || v === null) return false;
+  const o = v as Partial<PageByType>;
+  if (
+    !Number.isFinite(o.groups) ||
+    !Number.isFinite(o.channels) ||
+    (o.groups as number) < 1 ||
+    (o.channels as number) < 1
+  ) {
+    return false;
+  }
+  if (!Number.isFinite(o["groups-channels"]) || (o["groups-channels"] as number) < 1) {
+    (o as PageByType)["groups-channels"] = 1;
+  }
+  return true;
 }
 
 function readStoredScroll(): number {
@@ -228,14 +247,14 @@ export default function Dashboard({
     () =>
       readStoredJSON<FolderByType>(
         ACTIVE_FOLDER_STORAGE_KEY,
-        { groups: "all", channels: "all" },
+        { groups: "all", channels: "all", "groups-channels": "all" },
         isFolderByType,
       ),
   );
   const [pageByType, setPageByType] = useState<PageByType>(() =>
     readStoredJSON<PageByType>(
       PAGE_STORAGE_KEY,
-      { groups: 1, channels: 1 },
+      { groups: 1, channels: 1, "groups-channels": 1 },
       isPageByType,
     ),
   );
@@ -335,7 +354,9 @@ export default function Dashboard({
     if (selectedGroup) return; // inside a specific group — different scope
     const ready =
       activeMenu === "home" ||
-      ((activeMenu === "groups" || activeMenu === "channels") &&
+      ((activeMenu === "groups" ||
+        activeMenu === "channels" ||
+        activeMenu === "groups-channels") &&
         groupsCache !== null &&
         foldersCache !== null);
     if (!ready) return;
@@ -550,8 +571,12 @@ export default function Dashboard({
   function handleSwitchAccount(accountId: string) {
     setSelectedGroup(null);
     setActiveMenu("home");
-    setActiveFolderByType({ groups: "all", channels: "all" });
-    setPageByType({ groups: 1, channels: 1 });
+    setActiveFolderByType({
+      groups: "all",
+      channels: "all",
+      "groups-channels": "all",
+    });
+    setPageByType({ groups: 1, channels: 1, "groups-channels": 1 });
     setGroupsCache(null);
     setFoldersCache(null);
     setMediaCache({});
@@ -567,8 +592,17 @@ export default function Dashboard({
     const items: BreadcrumbItem[] = [
       { label: "Home", onClick: () => handleMenuChange("home") },
     ];
-    if (activeMenu === "groups" || activeMenu === "channels") {
-      const label = activeMenu === "groups" ? "Groups" : "Channels";
+    if (
+      activeMenu === "groups" ||
+      activeMenu === "channels" ||
+      activeMenu === "groups-channels"
+    ) {
+      const label =
+        activeMenu === "groups-channels"
+          ? "Group and Channel"
+          : activeMenu === "groups"
+            ? "Groups"
+            : "Channels";
       if (selectedGroup) {
         items.push({ label, onClick: handleBackToList });
         items.push({ label: selectedGroup.title });
@@ -666,13 +700,13 @@ export default function Dashboard({
                       </p>
                     </div>
 
-                    {/* Quick nav cards */}
-                    <div className="grid w-full grid-cols-2 gap-3">
+                    {/* Quick nav card — merged Groups & Channels */}
+                    <div className="grid w-full grid-cols-1 gap-3">
                       <button
-                        onClick={() => handleMenuChange("groups")}
+                        onClick={() => handleMenuChange("groups-channels")}
                         className="group flex flex-col items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm transition-all hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg hover:shadow-blue-500/10 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-blue-800"
                       >
-                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 transition-colors group-hover:bg-blue-100 dark:bg-blue-950/40">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-50 to-violet-50 transition-colors group-hover:from-blue-100 group-hover:to-violet-100 dark:from-blue-950/40 dark:to-violet-950/40">
                           <svg
                             width="22"
                             height="22"
@@ -684,48 +718,16 @@ export default function Dashboard({
                             strokeLinejoin="round"
                             className="text-blue-600 dark:text-blue-400"
                           >
-                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                            <circle cx="9" cy="7" r="4" />
-                            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                            <path d="M14 17v-2a3 3 0 0 0-3-3H5a3 3 0 0 0-3 3v2" />
+                            <circle cx="8" cy="7" r="3" />
+                            <line x1="18" y1="14" x2="18" y2="20" />
+                            <line x1="21" y1="11" x2="21" y2="20" />
+                            <line x1="15" y1="17" x2="15" y2="20" />
                           </svg>
                         </div>
                         <div>
                           <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                            Groups
-                          </p>
-                          <p className="mt-0.5 text-xs text-zinc-500">
-                            Browse media
-                          </p>
-                        </div>
-                      </button>
-
-                      <button
-                        onClick={() => handleMenuChange("channels")}
-                        className="group flex flex-col items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm transition-all hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-lg hover:shadow-violet-500/10 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-violet-800"
-                      >
-                        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-50 transition-colors group-hover:bg-violet-100 dark:bg-violet-950/40">
-                          <svg
-                            width="22"
-                            height="22"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="text-violet-600 dark:text-violet-400"
-                          >
-                            <path d="M2 20h.01" />
-                            <path d="M7 20v-4" />
-                            <path d="M12 20v-8" />
-                            <path d="M17 20V8" />
-                            <path d="M22 4v16" />
-                          </svg>
-                        </div>
-                        <div>
-                          <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                            Channels
+                            Group and Channel
                           </p>
                           <p className="mt-0.5 text-xs text-zinc-500">
                             Browse media
@@ -823,36 +825,55 @@ export default function Dashboard({
                 </div>
               )}
 
-              {(activeMenu === "groups" || activeMenu === "channels") &&
+              {(activeMenu === "groups" ||
+                activeMenu === "channels" ||
+                activeMenu === "groups-channels") &&
                 !selectedGroup && (
                   <GroupsGrid
                     session={session}
-                    type={activeMenu === "channels" ? "channels" : "groups"}
+                    type={
+                      activeMenu === "groups-channels"
+                        ? "all"
+                        : activeMenu === "channels"
+                          ? "channels"
+                          : "groups"
+                    }
                     activeFolderId={
-                      activeMenu === "channels"
-                        ? activeFolderByType.channels
-                        : activeFolderByType.groups
+                      activeFolderByType[
+                        activeMenu as
+                          | "groups"
+                          | "channels"
+                          | "groups-channels"
+                      ]
                     }
                     onActiveFolderChange={(folderId) => {
-                      setActiveFolderByType((prev) =>
-                        activeMenu === "channels"
-                          ? { ...prev, channels: folderId }
-                          : { ...prev, groups: folderId },
-                      );
+                      setActiveFolderByType((prev) => ({
+                        ...prev,
+                        [activeMenu]: folderId,
+                      }));
                     }}
                     onGroupSelect={handleGroupSelect}
                     groups={groupsCache}
                     folders={foldersCache}
                     onGroupsLoaded={handleGroupsLoaded}
                     onFoldersLoaded={handleFoldersLoaded}
-                    page={pageByType[activeMenu as "groups" | "channels"]}
+                    page={
+                      pageByType[
+                        activeMenu as
+                          | "groups"
+                          | "channels"
+                          | "groups-channels"
+                      ]
+                    }
                     onPageChange={(page) =>
                       setPageByType((prev) => ({ ...prev, [activeMenu]: page }))
                     }
                   />
                 )}
 
-              {(activeMenu === "groups" || activeMenu === "channels") &&
+              {(activeMenu === "groups" ||
+                activeMenu === "channels" ||
+                activeMenu === "groups-channels") &&
                 selectedGroup && (
                   // Both views stay mounted (the inactive one is hidden with
                   // `visibility`, which keeps its layout) so switching between
@@ -883,8 +904,23 @@ export default function Dashboard({
                       <GroupChatView
                         sessionString={session}
                         target={{
+                          // In the merged "groups-channels" view we can't
+                          // tell from activeMenu whether the selected row
+                          // is a channel or a group, so look up the actual
+                          // flags from the cached dialog list.
                           kind:
-                            activeMenu === "channels" ? "channel" : "group",
+                            activeMenu === "channels"
+                              ? "channel"
+                              : activeMenu === "groups-channels"
+                                ? (() => {
+                                    const g = groupsCache?.find(
+                                      (x) => x.id === selectedGroup.id,
+                                    );
+                                    return g?.isChannel && !g.isGroup
+                                      ? "channel"
+                                      : "group";
+                                  })()
+                                : "group",
                           id: selectedGroup.id,
                           title: selectedGroup.title,
                           isMember: true,

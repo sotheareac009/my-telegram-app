@@ -38,6 +38,13 @@ interface Message {
     entities?: TextEntity[];
     /** Emoji reactions on this message. */
     reactions?: MessageReaction[];
+    /** Phone call info (for MessageService calls). */
+    phoneCall?: {
+        duration?: number;
+        video?: boolean;
+        reason?: "missed" | "disconnect" | "hangup" | "busy";
+        isOutgoing: boolean;
+    };
 }
 
 /** A chat the user can forward messages to (from /api/telegram/dialogs). */
@@ -1707,6 +1714,58 @@ function Bubble({
                             )}
                         </div>
                     )}
+                    {msg?.phoneCall && (
+                        <div className="flex items-center gap-3 py-1 px-1 min-w-[210px]">
+                            {/* Icon */}
+                            <div className={`
+                                flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white
+                                ${msg.phoneCall.reason === "missed"
+                                    ? "bg-red-500 shadow-sm"
+                                    : msg.phoneCall.isOutgoing
+                                        ? "bg-blue-500 shadow-sm"
+                                        : "bg-green-500 shadow-sm"
+                                }
+                            `}>
+                                {msg.phoneCall.reason === "missed" ? (
+                                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M16 8l-8 8m0 0h6m-6 0V10" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.94.725l.548 2.2a1 1 0 01-.321.988l-1.305.98a10.582 10.582 0 004.872 4.872l.98-1.305a1 1 0 01.988-.321l2.2.548a1 1 0 01.725.94V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                                    </svg>
+                                ) : msg.phoneCall.isOutgoing ? (
+                                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 16l8-8m0 0h-6m6 0v6" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.94.725l.548 2.2a1 1 0 01-.321.988l-1.305.98a10.582 10.582 0 004.872 4.872l.98-1.305a1 1 0 01.988-.321l2.2.548a1 1 0 01.725.94V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                                    </svg>
+                                ) : (
+                                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M16 8l-8 8m0 0h6m-6 0V10" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.94.725l.548 2.2a1 1 0 01-.321.988l-1.305.98a10.582 10.582 0 004.872 4.872l.98-1.305a1 1 0 01.988-.321l2.2.548a1 1 0 01.725.94V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                                    </svg>
+                                )}
+                            </div>
+
+                            {/* Label & Details */}
+                            <div className="flex flex-col min-w-0 pr-2">
+                                <span className="text-[13.5px] font-semibold text-zinc-950 dark:text-zinc-50">
+                                    {msg.phoneCall.reason === "missed"
+                                        ? msg.phoneCall.isOutgoing ? "Cancelled Call" : "Missed Call"
+                                        : msg.phoneCall.isOutgoing ? "Outgoing Call" : "Incoming Call"
+                                    }
+                                </span>
+                                <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                    {msg.phoneCall.reason === "missed"
+                                        ? "Missed"
+                                        : msg.phoneCall.reason === "busy"
+                                            ? "Line Busy"
+                                            : msg.phoneCall.duration 
+                                                ? formatDuration(msg.phoneCall.duration) 
+                                                : "Answered"
+                                    }
+                                    {msg.phoneCall.video && " · Video"}
+                                </span>
+                            </div>
+                        </div>
+                    )}
                     {msg?.text && (
                         <span
                             className={`whitespace-pre-wrap ${
@@ -3031,6 +3090,26 @@ export default function TelegramChat({
                             setMenu(null);
                         }}
                     />
+                    {(() => {
+                        // Texts of the selected messages, in chat order, skipping
+                        // anything with an empty body (stickers, media without
+                        // caption). Only render Copy when at least one has text.
+                        const menuTexts = menu.ids
+                            .map(
+                                (id) =>
+                                    messages.find((m) => m.id === id)?.text ??
+                                    "",
+                            )
+                            .filter((t) => t.length > 0);
+                        // Ids of messages whose media we can stream to disk.
+                        // `contact` is a vCard-style payload, not a file —
+                        // downloading it doesn't make sense, so we skip it.
+                        const menuMediaIds = menu.ids.filter((id) => {
+                            const m = messages.find((m) => m.id === id);
+                            if (!m?.media) return false;
+                            return m.media.kind !== "contact";
+                        });
+                        return (
                     <div
                         className="fixed z-50 min-w-[170px] overflow-hidden rounded-xl border border-zinc-200 bg-white dark:bg-zinc-900 py-1 shadow-xl"
                         style={{
@@ -3038,6 +3117,70 @@ export default function TelegramChat({
                             top: Math.min(menu.y, window.innerHeight - 60),
                         }}
                     >
+                        {menuTexts.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    try {
+                                        await navigator.clipboard.writeText(
+                                            menuTexts.join("\n\n"),
+                                        );
+                                    } catch {
+                                        // Clipboard API can fail in WebViews
+                                        // without permission — silently ignore.
+                                    }
+                                    setMenu(null);
+                                }}
+                                className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100"
+                            >
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" />
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                                </svg>
+                                {menuTexts.length > 1
+                                    ? `Copy ${menuTexts.length} messages`
+                                    : "Copy text"}
+                            </button>
+                        )}
+                        {menuMediaIds.length > 0 && sessionString && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    // Trigger one download per selected media
+                                    // by clicking a temporary <a download>.
+                                    // Browsers may throttle bulk downloads, so
+                                    // stagger them with a small delay.
+                                    menuMediaIds.forEach((id, i) => {
+                                        setTimeout(() => {
+                                            const a =
+                                                document.createElement("a");
+                                            a.href = mediaUrl(id, {
+                                                download: true,
+                                            });
+                                            // Empty `download` attribute keeps
+                                            // the server-provided filename from
+                                            // Content-Disposition.
+                                            a.download = "";
+                                            a.rel = "noopener";
+                                            document.body.appendChild(a);
+                                            a.click();
+                                            document.body.removeChild(a);
+                                        }, i * 200);
+                                    });
+                                    setMenu(null);
+                                }}
+                                className="flex w-full items-center gap-2.5 px-3.5 py-2 text-left text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100"
+                            >
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="7 10 12 15 17 10" />
+                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                </svg>
+                                {menuMediaIds.length > 1
+                                    ? `Download ${menuMediaIds.length} files`
+                                    : "Download"}
+                            </button>
+                        )}
                         {sessionString && (
                             <button
                                 type="button"
@@ -3079,6 +3222,8 @@ export default function TelegramChat({
                             </button>
                         )}
                     </div>
+                        );
+                    })()}
                 </>
             )}
 

@@ -72,6 +72,12 @@ type ChatUiMessage = {
     linkPreview?: LinkPreview;
     entities?: TextEntity[];
     reactions?: MessageReaction[];
+    phoneCall?: {
+        duration?: number;
+        video?: boolean;
+        reason?: "missed" | "disconnect" | "hangup" | "busy";
+        isOutgoing: boolean;
+    };
 };
 
 /** Raw message shape returned by /api/telegram/conversation. */
@@ -87,6 +93,12 @@ type ApiMessage = {
     linkPreview?: LinkPreview;
     entities?: TextEntity[];
     reactions?: MessageReaction[];
+    phoneCall?: {
+        duration?: number;
+        video?: boolean;
+        reason?: "missed" | "disconnect" | "hangup" | "busy";
+        isOutgoing: boolean;
+    };
 };
 
 function toUiMessage(m: ApiMessage): ChatUiMessage {
@@ -102,6 +114,7 @@ function toUiMessage(m: ApiMessage): ChatUiMessage {
         linkPreview: m.linkPreview,
         entities: m.entities,
         reactions: m.reactions,
+        phoneCall: m.phoneCall,
     };
 }
 

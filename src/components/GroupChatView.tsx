@@ -45,6 +45,12 @@ type ApiMessage = {
   linkPreview?: LinkPreview;
   entities?: TextEntity[];
   reactions?: MessageReaction[];
+  phoneCall?: {
+    duration?: number;
+    video?: boolean;
+    reason?: "missed" | "disconnect" | "hangup" | "busy";
+    isOutgoing: boolean;
+  };
 };
 
 type UiMessage = {
@@ -61,6 +67,12 @@ type UiMessage = {
   linkPreview?: LinkPreview;
   entities?: TextEntity[];
   reactions?: MessageReaction[];
+  phoneCall?: {
+    duration?: number;
+    video?: boolean;
+    reason?: "missed" | "disconnect" | "hangup" | "busy";
+    isOutgoing: boolean;
+  };
 };
 
 function toUi(m: ApiMessage): UiMessage {
@@ -78,6 +90,7 @@ function toUi(m: ApiMessage): UiMessage {
     linkPreview: m.linkPreview,
     entities: m.entities,
     reactions: m.reactions,
+    phoneCall: m.phoneCall,
   };
 }
 

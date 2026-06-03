@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { trimAccountsToLimit } from '@/lib/telegram-account-link';
+import { createClient } from '@/lib/telegram';
+import { Api } from 'telegram';
+import { cancelAllJobs, userKeyFromSession } from '@/lib/forward-registry';
 
 // Helper to check admin password
 function checkAdminAuth(request: Request) {
@@ -54,17 +57,23 @@ export async function GET(request: Request) {
     const codesList = data.map((c) => c.code);
     const { data: accountsData } = await supabase
       .from('telegram_accounts')
-      .select('access_code')
+      .select('telegram_id, phone, first_name, last_name, username, access_code')
       .in('access_code', codesList);
 
-    const countMap: Record<string, number> = {};
+    const accountsMap: Record<string, any[]> = {};
     for (const code of codesList) {
-      countMap[code] = 0;
+      accountsMap[code] = [];
     }
     if (accountsData) {
       for (const row of accountsData) {
         if (row.access_code) {
-          countMap[row.access_code] = (countMap[row.access_code] || 0) + 1;
+          accountsMap[row.access_code].push({
+            telegram_id: row.telegram_id,
+            phone: row.phone,
+            first_name: row.first_name,
+            last_name: row.last_name,
+            username: row.username,
+          });
         }
       }
     }
@@ -72,7 +81,8 @@ export async function GET(request: Request) {
     for (const c of data) {
       codesWithCounts.push({
         ...c,
-        linked_accounts_count: countMap[c.code] ?? 0,
+        linked_accounts_count: accountsMap[c.code]?.length ?? 0,
+        linked_accounts: accountsMap[c.code] ?? [],
       });
     }
   }
@@ -262,4 +272,102 @@ export async function PATCH(request: Request) {
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
+}
+
+// DELETE — fully remove an access code AND every linked Telegram account.
+// For each linked account we cancel in-flight forwards and call auth.LogOut
+// so the Telegram session can't be reused, then the FK cascade deletes the
+// telegram_accounts rows along with the access_codes row.
+//
+// Accepts `id` in either the query string (?id=…) or JSON body — admins
+// hitting it from a form-style request can use either.
+export async function DELETE(request: Request) {
+  if (!checkAdminAuth(request)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  let id: string | number | null = null;
+  const urlId = new URL(request.url).searchParams.get('id');
+  if (urlId) id = urlId;
+  if (!id) {
+    try {
+      const body = await request.json();
+      id = body?.id ?? null;
+    } catch {
+      // body may be empty — that's fine, we'll error below
+    }
+  }
+  if (!id) {
+    return NextResponse.json({ error: 'id is required' }, { status: 400 });
+  }
+
+  // Resolve the code string so we can find linked telegram_accounts rows.
+  const { data: codeRow, error: codeErr } = await supabase
+    .from('access_codes')
+    .select('code')
+    .eq('id', id)
+    .single();
+
+  if (codeErr || !codeRow) {
+    return NextResponse.json(
+      { error: 'Access code not found' },
+      { status: 404 },
+    );
+  }
+
+  // Pull the linked telegram_accounts so we can clean up their Telegram
+  // sessions before the cascade delete drops the rows.
+  const { data: linked } = await supabase
+    .from('telegram_accounts')
+    .select('session')
+    .eq('access_code', codeRow.code);
+
+  // Log out each session in parallel — best effort, never blocks the
+  // delete on Telegram-side failures.
+  if (linked && linked.length > 0) {
+    await Promise.all(
+      linked.map(async (row: { session?: string | null }) => {
+        const sessionString = row.session ?? '';
+        if (!sessionString) return;
+        try {
+          cancelAllJobs(userKeyFromSession(sessionString));
+        } catch {
+          // forward-registry hiccup — proceed
+        }
+        try {
+          const client = createClient(sessionString);
+          await client.connect();
+          try {
+            await client.invoke(new Api.auth.LogOut());
+          } catch {
+            // session already dead / rejected LogOut — proceed
+          }
+          try {
+            await client.disconnect();
+          } catch {
+            // ignore
+          }
+        } catch {
+          // couldn't even connect — proceed with the DB delete
+        }
+      }),
+    );
+  }
+
+  // Drop the access code. The FK cascade defined in the
+  // telegram_accounts migration removes the link rows automatically; if
+  // you didn't set ON DELETE CASCADE, run the explicit delete first.
+  const { error: deleteErr } = await supabase
+    .from('access_codes')
+    .delete()
+    .eq('id', id);
+
+  if (deleteErr) {
+    return NextResponse.json({ error: deleteErr.message }, { status: 500 });
+  }
+
+  return NextResponse.json({
+    success: true,
+    removedAccounts: linked?.length ?? 0,
+  });
 }

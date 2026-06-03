@@ -149,6 +149,15 @@ interface TelegramAccount {
 interface DashboardProps {
   user: UserInfo;
   session: string;
+  /** Access code the user signed in with — surfaced in the Header menu
+   * so the user always knows which code they're operating under. */
+  accessCode: string;
+  /** Contact info attached to the access code at admin-issuance time. */
+  accessCodeHolder: {
+    firstName?: string;
+    lastName?: string;
+    phoneNumber?: string;
+  } | null;
   accounts: TelegramAccount[];
   currentAccountId: string;
   onSwitchAccount: (accountId: string) => void;
@@ -163,6 +172,8 @@ interface DashboardProps {
 export default function Dashboard({
   user,
   session,
+  accessCode,
+  accessCodeHolder,
   accounts,
   currentAccountId,
   onSwitchAccount,
@@ -593,6 +604,8 @@ export default function Dashboard({
           session={session}
           accounts={accounts}
           currentAccountId={currentAccountId}
+          accessCode={accessCode}
+          accessCodeHolder={accessCodeHolder}
           onSwitchAccount={handleSwitchAccount}
           onAddAccount={onAddAccount}
           onSignOut={onSignOut}

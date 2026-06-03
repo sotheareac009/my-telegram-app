@@ -4,6 +4,14 @@ import { useEffect, useState } from "react";
 
 const PAGE_SIZE = 20;
 
+interface LinkedTelegramAccount {
+  telegram_id: string;
+  phone: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  username: string | null;
+}
+
 interface AccessCode {
   id: string;
   code: string;
@@ -15,6 +23,7 @@ interface AccessCode {
   /** Max Telegram accounts this code can link; null = unlimited. */
   account_limit: number | null;
   linked_accounts_count: number;
+  linked_accounts?: LinkedTelegramAccount[];
 }
 
 export default function AdminDashboard() {
@@ -32,6 +41,7 @@ export default function AdminDashboard() {
   /** Empty string = unlimited; otherwise the cap as a string of digits. */
   const [formAccountLimit, setFormAccountLimit] = useState("");
   const [formCustomCode, setFormCustomCode] = useState("");
+  const [selectedCodeForAccounts, setSelectedCodeForAccounts] = useState<AccessCode | null>(null);
   const [generating, setGenerating] = useState(false);
   const [formError, setFormError] = useState("");
   const [warningDialog, setWarningDialog] = useState<{
@@ -39,6 +49,12 @@ export default function AdminDashboard() {
     title: string;
     message: string;
   }>({ show: false, title: "", message: "" });
+  /** Confirmation state for the destructive "Delete access code" action.
+   * `deleting` is set true while the API call is in flight. */
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    code: AccessCode;
+  } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -209,6 +225,47 @@ export default function AdminDashboard() {
     }
   }
 
+  /** Run the actual DELETE after the confirm dialog. Server logs out every
+   * linked Telegram session and drops the code; on success we remove the
+   * row from local state without a re-fetch. */
+  async function confirmDelete() {
+    if (!deleteConfirm) return;
+    const { code } = deleteConfirm;
+    setDeleting(true);
+    try {
+      const res = await fetch(
+        `/api/admin/codes?id=${encodeURIComponent(code.id)}`,
+        {
+          method: "DELETE",
+          headers: { "x-admin-password": password },
+        },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setWarningDialog({
+          show: true,
+          title: "Failed to delete",
+          message:
+            data?.error ||
+            "Could not delete this access code. Please try again.",
+        });
+        return;
+      }
+      // Remove from the visible list. Total count is also off by one now.
+      setCodes((prev) => prev.filter((c) => c.id !== code.id));
+      setTotal((prev) => Math.max(0, prev - 1));
+      setDeleteConfirm(null);
+    } catch {
+      setWarningDialog({
+        show: true,
+        title: "Failed to delete",
+        message: "Network error — please try again.",
+      });
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   async function toggleStatus(id: string, currentStatus: boolean) {
     try {
       const res = await fetch("/api/admin/codes", {
@@ -316,7 +373,7 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-dvh bg-zinc-50 p-6 dark:bg-zinc-950">
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-[1200px]">
         <div className="mb-8 flex items-center justify-between rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
           <div>
             <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">Access Codes</h1>
@@ -400,7 +457,11 @@ export default function AdminDashboard() {
               ) : codes.map((code) => {
                 const fullName = [code.first_name, code.last_name].filter(Boolean).join(" ");
                 return (
-                  <tr key={code.id} className="transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                  <tr 
+                    key={code.id} 
+                    onClick={() => setSelectedCodeForAccounts(code)}
+                    className="cursor-pointer transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                  >
                     <td className="px-6 py-4">
                       <code className="rounded-md bg-zinc-100 px-2 py-1 font-mono font-bold text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200">
                         {code.code}
@@ -426,6 +487,24 @@ export default function AdminDashboard() {
                             Unlimited
                           </span>
                         )}
+                        {/* {code.linked_accounts && code.linked_accounts.length > 0 && (
+                          <div className="mt-2 space-y-1.5 border-t border-zinc-100 dark:border-zinc-800 pt-2 max-w-[160px]">
+                            {code.linked_accounts.map((acc) => {
+                              const name = [acc.first_name, acc.last_name].filter(Boolean).join(" ") || acc.username || acc.phone || "User";
+                              const initials = ([acc.first_name?.[0], acc.last_name?.[0]].filter(Boolean).join("") || "U").toUpperCase().slice(0, 2);
+                              return (
+                                <div key={acc.telegram_id} className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400" title={`${name} (${acc.telegram_id})`}>
+                                  <div className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-blue-500 to-cyan-400 text-[8px] font-bold text-white uppercase select-none">
+                                    {initials}
+                                  </div>
+                                  <span className="truncate text-[11px]">
+                                    {name}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )} */}
                       </div>
                     </td>
                     <td className="px-6 py-4 text-zinc-500">
@@ -439,16 +518,48 @@ export default function AdminDashboard() {
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-4">
                         <button
-                          onClick={() => openEditModal(code)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEditModal(code);
+                          }}
                           className="text-sm font-semibold text-blue-600 transition-colors hover:text-blue-500"
                         >
                           Edit
                         </button>
                         <button
-                          onClick={() => toggleStatus(code.id, code.is_active)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleStatus(code.id, code.is_active);
+                          }}
                           className={`text-sm font-semibold transition-colors ${code.is_active ? "text-red-600 hover:text-red-500" : "text-emerald-600 hover:text-emerald-500"}`}
                         >
                           {code.is_active ? "Revoke Access" : "Restore Access"}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteConfirm({ code });
+                          }}
+                          title="Delete access code and all linked Telegram accounts"
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                          aria-label="Delete access code"
+                        >
+                          <svg
+                            width="15"
+                            height="15"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                            <path d="M10 11v6" />
+                            <path d="M14 11v6" />
+                            <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                          </svg>
                         </button>
                       </div>
                     </td>
@@ -636,6 +747,230 @@ export default function AdminDashboard() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {selectedCodeForAccounts && (
+        <div 
+          onClick={() => setSelectedCodeForAccounts(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/50 backdrop-blur-sm p-4 animate-fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 overflow-hidden"
+          >
+            <div className="mb-5 flex items-start justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-zinc-900 dark:text-white">
+                    Linked Accounts
+                  </h2>
+                  <code className="rounded-md bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 font-mono text-sm font-bold text-blue-700 dark:text-blue-400 border border-blue-200/50 dark:border-blue-800/50">
+                    {selectedCodeForAccounts.code}
+                  </code>
+                </div>
+                <p className="mt-1 text-sm text-zinc-500">
+                  Telegram accounts currently active under this access code.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedCodeForAccounts(null)}
+                className="rounded-lg p-1.5 text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Owner Details summary */}
+            <div className="mb-5 grid grid-cols-2 gap-4 rounded-xl bg-zinc-50 p-4 text-xs dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800/80">
+              <div>
+                <span className="text-zinc-400 uppercase tracking-wider block font-medium mb-0.5">Assigned User</span>
+                <span className="font-semibold text-zinc-800 dark:text-zinc-200 text-sm">
+                  {[selectedCodeForAccounts.first_name, selectedCodeForAccounts.last_name].filter(Boolean).join(" ") || "Unassigned"}
+                </span>
+              </div>
+              <div>
+                <span className="text-zinc-400 uppercase tracking-wider block font-medium mb-0.5">Registered Phone</span>
+                <span className="font-semibold text-zinc-800 dark:text-zinc-200 text-sm">
+                  {selectedCodeForAccounts.phone_number || "Unregistered"}
+                </span>
+              </div>
+            </div>
+
+            {/* Linked accounts list */}
+            <div className="max-h-[300px] overflow-y-auto pr-1 space-y-3">
+              {!selectedCodeForAccounts.linked_accounts || selectedCodeForAccounts.linked_accounts.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 text-center text-zinc-400">
+                  <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-zinc-50 dark:bg-zinc-950 text-zinc-300 border border-zinc-100 dark:border-zinc-800/60 shadow-inner">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                      <circle cx="9" cy="7" r="4" />
+                      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                    </svg>
+                  </div>
+                  <p className="text-sm font-medium">No Telegram accounts linked yet</p>
+                  <p className="text-xs text-zinc-500 mt-0.5">The user has not logged in to Tigram with this access code.</p>
+                </div>
+              ) : (
+                selectedCodeForAccounts.linked_accounts.map((acc) => {
+                  const name = [acc.first_name, acc.last_name].filter(Boolean).join(" ") || acc.username || acc.phone || "User";
+                  const initials = ([acc.first_name?.[0], acc.last_name?.[0]].filter(Boolean).join("") || "U").toUpperCase().slice(0, 2);
+                  return (
+                    <div 
+                      key={acc.telegram_id} 
+                      className="flex items-center justify-between rounded-xl border border-zinc-100 bg-zinc-50/50 p-4 transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:bg-zinc-800/40"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-violet-500 to-fuchsia-500 text-xs font-bold text-white uppercase shadow-md select-none">
+                          {initials}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+                            {name}
+                          </p>
+                          {acc.username && (
+                            <p className="truncate text-xs text-blue-600 dark:text-blue-400 font-medium">
+                              @{acc.username}
+                            </p>
+                          )}
+                          {acc.phone && (
+                            <p className="truncate text-xs text-zinc-500">
+                              {acc.phone}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-col items-end gap-1 shrink-0 text-right ml-4">
+                        <span className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+                          Telegram ID
+                        </span>
+                        <div className="flex items-center gap-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-950 px-2 py-1 border border-zinc-200/50 dark:border-zinc-800/50">
+                          <code className="text-xs font-mono font-bold text-zinc-700 dark:text-zinc-300">
+                            {acc.telegram_id}
+                          </code>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(acc.telegram_id);
+                            }}
+                            title="Copy ID"
+                            className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSelectedCodeForAccounts(null)}
+                className="rounded-xl bg-zinc-900 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-zinc-850 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/50 backdrop-blur-sm p-4"
+          onClick={() => !deleting && setDeleteConfirm(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+            onClick={(e) => e.stopPropagation()}
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="Delete access code"
+          >
+            {/* Red trash badge — matches the warningDialog amber badge
+                pattern but in destructive red so the action lands. */}
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 dark:bg-red-950/30 text-red-500 shadow-sm">
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <path d="M10 11v6" />
+                <path d="M14 11v6" />
+                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+              </svg>
+            </div>
+
+            <h3 className="text-lg font-bold text-zinc-900 dark:text-white mb-2">
+              Delete this access code?
+            </h3>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-2 leading-relaxed">
+              <span className="font-mono font-semibold text-zinc-700 dark:text-zinc-300">
+                {deleteConfirm.code.code}
+              </span>{" "}
+              will be permanently deleted.
+            </p>
+            {deleteConfirm.code.linked_accounts_count > 0 && (
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-2 leading-relaxed">
+                Its{" "}
+                <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+                  {deleteConfirm.code.linked_accounts_count} linked Telegram
+                  account
+                  {deleteConfirm.code.linked_accounts_count === 1 ? "" : "s"}
+                </span>{" "}
+                will be signed out and unlinked.
+              </p>
+            )}
+            <p className="text-xs text-red-600 dark:text-red-400 mb-6">
+              This action can&apos;t be undone.
+            </p>
+
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirm(null)}
+                disabled={deleting}
+                className="rounded-xl bg-zinc-100 px-4 py-2.5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200 disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="inline-flex items-center justify-center rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-red-500/30 transition hover:bg-red-500 disabled:opacity-60"
+              >
+                {deleting ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    Deleting…
+                  </span>
+                ) : (
+                  "Delete"
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

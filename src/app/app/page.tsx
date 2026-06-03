@@ -326,6 +326,13 @@ export default function Home() {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [accounts, setAccounts] = useState<TelegramAccount[]>([]);
   const [activeAccessCode, setActiveAccessCode] = useState("");
+  /** Contact info attached to the access code at admin-issuance time —
+   * surfaced in the Header dropdown so the user knows whose code this is. */
+  const [accessCodeHolder, setAccessCodeHolder] = useState<{
+    firstName?: string;
+    lastName?: string;
+    phoneNumber?: string;
+  } | null>(null);
   const [currentAccountId, setCurrentAccountId] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -361,12 +368,22 @@ export default function Home() {
         if (!accountsRes.ok) {
           // If the server says we are not authenticated (e.g. 401), we can't load anyway
           setChecking(false);
+          if (accountsRes.status === 401) {
+            window.location.href = "/auth";
+          }
           return;
         }
 
         const accountsData = await accountsRes.json();
         const accessCode = accountsData.accessCode || "";
         setActiveAccessCode(accessCode);
+        if (accountsData.accessCodeHolder) {
+          setAccessCodeHolder({
+            firstName: accountsData.accessCodeHolder.firstName,
+            lastName: accountsData.accessCodeHolder.lastName,
+            phoneNumber: accountsData.accessCodeHolder.phoneNumber,
+          });
+        }
 
         // Server-returned accounts
         const serverAccounts: TelegramAccount[] = accountsData.accounts ?? [];
@@ -863,6 +880,8 @@ export default function Home() {
           <Dashboard
             user={user}
             session={sessionString}
+            accessCode={activeAccessCode}
+            accessCodeHolder={accessCodeHolder}
             accounts={accounts}
             currentAccountId={currentAccountId}
             onSwitchAccount={handleSwitchAccount}

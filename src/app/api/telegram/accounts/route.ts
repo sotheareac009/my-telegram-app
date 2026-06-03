@@ -20,6 +20,26 @@ export async function GET() {
   if (!accessCode) {
     return Response.json({ error: "Not authenticated" }, { status: 401 });
   }
+
+  // Check if the access code is still active AND grab the holder info
+  // (the contact name + phone the admin entered when issuing the code).
+  // Surfaced in the Header menu so the user can tell at a glance whose
+  // code they're operating under.
+  const { data: codeRow, error: codeErr } = await supabase
+    .from("access_codes")
+    .select("is_active, first_name, last_name, phone_number")
+    .eq("code", accessCode)
+    .single();
+
+  if (codeErr || !codeRow || !codeRow.is_active) {
+    try {
+      cookieStore.delete("app_access_code");
+    } catch {
+      // Safe fallback if delete fails
+    }
+    return Response.json({ error: "Access code revoked" }, { status: 401 });
+  }
+
   const { data, error } = await supabase
     .from("telegram_accounts")
     .select(
@@ -43,5 +63,13 @@ export async function GET() {
     },
   }));
 
-  return Response.json({ accounts, accessCode });
+  return Response.json({
+    accounts,
+    accessCode,
+    accessCodeHolder: {
+      firstName: codeRow.first_name || undefined,
+      lastName: codeRow.last_name || undefined,
+      phoneNumber: codeRow.phone_number || undefined,
+    },
+  });
 }

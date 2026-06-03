@@ -150,12 +150,21 @@ export async function validateNewAccount(
       };
     }
 
-    // Count-limit check (applies in both flows).
+    // Count-limit and active status check (applies in both flows).
     const { data: code } = await supabase
       .from("access_codes")
-      .select("account_limit")
+      .select("is_active, account_limit")
       .eq("code", accessCode)
       .single();
+
+    if (!code || !code.is_active) {
+      return {
+        allowed: false,
+        code: "invalid-account",
+        message:
+          "This access code has been revoked or is no longer active. Please contact your administrator.",
+      };
+    }
     const limit: number | null =
       code?.account_limit != null ? Number(code.account_limit) : null;
 

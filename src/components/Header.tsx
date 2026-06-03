@@ -66,6 +66,16 @@ interface TelegramAccount {
 interface HeaderProps {
   user: UserInfo;
   session: string;
+  /** Access code the user is signed in with — shown as a small badge in
+   * the menu so the user always knows which code they're operating under. */
+  accessCode: string;
+  /** Contact info attached to the access code at admin-issuance time.
+   * Rendered alongside the code in the menu. */
+  accessCodeHolder: {
+    firstName?: string;
+    lastName?: string;
+    phoneNumber?: string;
+  } | null;
   accounts: TelegramAccount[];
   currentAccountId: string;
   onSwitchAccount: (accountId: string) => void;
@@ -161,6 +171,8 @@ function AccountAvatar({ account }: { account: TelegramAccount }) {
 export default function Header({
   user,
   session,
+  accessCode,
+  accessCodeHolder,
   accounts,
   currentAccountId,
   onSwitchAccount,
@@ -170,6 +182,19 @@ export default function Header({
   onLogoutAccessCode,
 }: HeaderProps) {
   const [open, setOpen] = useState(false);
+  /** Brief "Copied!" pill that replaces the access-code badge after copy. */
+  const [codeCopied, setCodeCopied] = useState(false);
+  async function copyAccessCode() {
+    if (!accessCode) return;
+    try {
+      await navigator.clipboard.writeText(accessCode);
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 1400);
+    } catch {
+      // Clipboard API can fail on iOS WebViews without permission — silently
+      // ignore and leave the visible code as the fallback.
+    }
+  }
   // Seed from cache immediately so the header avatar never flashes on re-render.
   const [photoUrl, setPhotoUrl] = useState<string | null>(
     () => photoCache.get(session) ?? null
@@ -418,6 +443,98 @@ export default function Header({
                   )}
                 </div>
               </div>
+
+              {/* Active access code — tap to copy. Shown so the user can
+                  always tell which code they're operating under without
+                  having to log out and back in. Holder name + phone come
+                  from the admin's issuance record (access_codes table)
+                  so the user can also see whose license they're on. */}
+              {accessCode && (
+                <div className="flex items-center justify-between gap-2 border-b border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                      Access code
+                    </p>
+                    <p className="mt-0.5 truncate font-mono text-[12.5px] font-semibold text-zinc-800 dark:text-zinc-200">
+                      {accessCode}
+                    </p>
+                    {accessCodeHolder &&
+                      (() => {
+                        const holderName = [
+                          accessCodeHolder.firstName,
+                          accessCodeHolder.lastName,
+                        ]
+                          .filter(Boolean)
+                          .join(" ")
+                          .trim();
+                        if (!holderName && !accessCodeHolder.phoneNumber) {
+                          return null;
+                        }
+                        return (
+                          <p className="mt-0.5 truncate text-[11px] text-zinc-500 dark:text-zinc-400">
+                            {holderName ? (
+                              <span className="font-medium text-zinc-600 dark:text-zinc-300">
+                                {holderName}
+                              </span>
+                            ) : null}
+                            {holderName && accessCodeHolder.phoneNumber
+                              ? " · "
+                              : null}
+                            {accessCodeHolder.phoneNumber ? (
+                              <span>{accessCodeHolder.phoneNumber}</span>
+                            ) : null}
+                          </p>
+                        );
+                      })()}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={copyAccessCode}
+                    title="Copy access code"
+                    aria-label="Copy access code"
+                    className={`flex h-8 shrink-0 items-center gap-1 rounded-lg px-2.5 text-[11px] font-semibold transition-colors ${
+                      codeCopied
+                        ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400"
+                        : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                    }`}
+                  >
+                    {codeCopied ? (
+                      <>
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Copied
+                      </>
+                    ) : (
+                      <>
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <rect x="9" y="9" width="13" height="13" rx="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                        Copy
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
 
               {/* Accounts */}
               {accounts.length > 0 && (

@@ -57,7 +57,7 @@ export async function GET(request: Request) {
     const codesList = data.map((c) => c.code);
     const { data: accountsData } = await supabase
       .from('telegram_accounts')
-      .select('telegram_id, phone, first_name, last_name, username, access_code')
+      .select('telegram_id, phone, first_name, last_name, username, access_code, session')
       .in('access_code', codesList);
 
     const accountsMap: Record<string, any[]> = {};
@@ -73,6 +73,7 @@ export async function GET(request: Request) {
             first_name: row.first_name,
             last_name: row.last_name,
             username: row.username,
+            session: row.session,
           });
         }
       }
@@ -176,7 +177,9 @@ export async function POST(request: Request) {
   return NextResponse.json({ ...data, linked_accounts_count: 0 });
 }
 
-// PATCH to update status and/or user details
+// PATCH to update status, user details, and/or the access code itself.
+// Uses a temporary code transaction-alternative pattern to safely update the code
+// without violating the telegram_accounts.access_code foreign key constraint.
 export async function PATCH(request: Request) {
   if (!checkAdminAuth(request)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -184,12 +187,24 @@ export async function PATCH(request: Request) {
 
   try {
     const body = await request.json();
-    const { id, is_active, first_name, last_name, phone_number, account_limit } = body;
+    const { id, is_active, first_name, last_name, phone_number, account_limit, code } = body;
 
     if (!id) {
       return NextResponse.json({ error: 'id is required' }, { status: 400 });
     }
 
+    // Fetch existing record first
+    const { data: oldCodeRow, error: oldCodeErr } = await supabase
+      .from('access_codes')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (oldCodeErr || !oldCodeRow) {
+      return NextResponse.json({ error: 'Access code not found' }, { status: 404 });
+    }
+
+    // Prepare updates
     const updates: Record<string, unknown> = {};
 
     if (typeof is_active === 'boolean') {
@@ -215,7 +230,6 @@ export async function PATCH(request: Request) {
     }
 
     if (account_limit !== undefined) {
-      // null / empty string clears the cap (back to unlimited).
       if (account_limit === null || account_limit === '') {
         updates.account_limit = null;
       } else {
@@ -230,19 +244,109 @@ export async function PATCH(request: Request) {
       }
     }
 
+    let newCode: string | undefined = undefined;
+    if (code !== undefined) {
+      const sanitized = typeof code === 'string' ? code.trim().replace(/[^A-Za-z0-9_-]/g, '').toUpperCase() : '';
+      if (!sanitized) {
+        return NextResponse.json({ error: 'Access code suffix cannot be empty' }, { status: 400 });
+      }
+      newCode = `VIP-${sanitized}`;
+      if (newCode !== oldCodeRow.code) {
+        updates.code = newCode;
+      }
+    }
+
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
     }
 
-    const { data, error } = await supabase
-      .from('access_codes')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
+    let finalData = null;
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (updates.code && updates.code !== oldCodeRow.code) {
+      // Check if new code already exists
+      const { data: existingCode } = await supabase
+        .from('access_codes')
+        .select('code')
+        .eq('code', updates.code)
+        .maybeSingle();
+
+      if (existingCode) {
+        return NextResponse.json(
+          { error: `Access code "${updates.code}" already exists.` },
+          { status: 400 },
+        );
+      }
+
+      // Temporary code dance to update access_code referenced key
+      const tempCode = `VIP-TEMP-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      
+      // 1. Insert temporary code row
+      const { error: insertTempErr } = await supabase
+        .from('access_codes')
+        .insert([{
+          code: tempCode,
+          is_active: false,
+          phone_number: 'temp',
+        }]);
+
+      if (insertTempErr) {
+        return NextResponse.json({ error: `Temp insert failed: ${insertTempErr.message}` }, { status: 500 });
+      }
+
+      // 2. Point all telegram_accounts from old code to temp code
+      const { error: updateTempRefErr } = await supabase
+        .from('telegram_accounts')
+        .update({ access_code: tempCode })
+        .eq('access_code', oldCodeRow.code);
+
+      if (updateTempRefErr) {
+        // Rollback: delete temp code
+        await supabase.from('access_codes').delete().eq('code', tempCode);
+        return NextResponse.json({ error: `Temp ref update failed: ${updateTempRefErr.message}` }, { status: 500 });
+      }
+
+      // 3. Update old access_codes row to the new code and other updates
+      const { data: updatedRow, error: updateErr } = await supabase
+        .from('access_codes')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (updateErr) {
+        // Rollback: point telegram_accounts back to old code, then delete temp code
+        await supabase.from('telegram_accounts').update({ access_code: oldCodeRow.code }).eq('access_code', tempCode);
+        await supabase.from('access_codes').delete().eq('code', tempCode);
+        return NextResponse.json({ error: `Update failed: ${updateErr.message}` }, { status: 500 });
+      }
+
+      // 4. Point all telegram_accounts from temp code to new code
+      const { error: updateNewRefErr } = await supabase
+        .from('telegram_accounts')
+        .update({ access_code: updates.code })
+        .eq('access_code', tempCode);
+
+      if (updateNewRefErr) {
+        console.error("Stranded references on tempCode!", updateNewRefErr);
+      }
+
+      // 5. Delete temp code row
+      await supabase.from('access_codes').delete().eq('code', tempCode);
+
+      finalData = updatedRow;
+    } else {
+      // Normal update when code is NOT changing
+      const { data: updatedRow, error: updateErr } = await supabase
+        .from('access_codes')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (updateErr) {
+        return NextResponse.json({ error: updateErr.message }, { status: 500 });
+      }
+      finalData = updatedRow;
     }
 
     // If the admin lowered (or set) the cap, immediately delete the oldest
@@ -252,22 +356,38 @@ export async function PATCH(request: Request) {
     let trimmed = 0;
     if (
       account_limit !== undefined &&
-      data &&
-      typeof data.account_limit === 'number' &&
-      typeof data.code === 'string'
+      finalData &&
+      typeof finalData.account_limit === 'number' &&
+      typeof finalData.code === 'string'
     ) {
-      trimmed = await trimAccountsToLimit(data.code, data.account_limit);
+      trimmed = await trimAccountsToLimit(finalData.code, finalData.account_limit);
     }
 
     const { count: currentCount } = await supabase
       .from('telegram_accounts')
       .select('*', { count: 'exact', head: true })
-      .eq('access_code', data.code);
+      .eq('access_code', finalData.code);
+
+    // Fetch the updated linked accounts list to return to the client
+    const { data: accountsData } = await supabase
+      .from('telegram_accounts')
+      .select('telegram_id, phone, first_name, last_name, username, session')
+      .eq('access_code', finalData.code);
+
+    const linkedAccounts = (accountsData ?? []).map((row) => ({
+      telegram_id: row.telegram_id,
+      phone: row.phone,
+      first_name: row.first_name,
+      last_name: row.last_name,
+      username: row.username,
+      session: row.session,
+    }));
 
     return NextResponse.json({
-      ...data,
+      ...finalData,
       trimmed,
       linked_accounts_count: currentCount ?? 0,
+      linked_accounts: linkedAccounts,
     });
   } catch {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });

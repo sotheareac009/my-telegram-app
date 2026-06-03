@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import Dashboard from "@/components/Dashboard";
 import { ForwardJobsProvider } from "@/components/ForwardJobsContext";
+import { AccountAvatar } from "@/components/Header";
 
 type Step = "phone" | "code" | "password" | "done";
 
@@ -316,6 +317,115 @@ function RemoveAccountModal({
   );
 }
 
+/**
+ * Premium-styled confirmation modal for signing out a Telegram account.
+ * Matches the design language of `RemoveAccountModal` but uses a warning orange/amber
+ * gradient theme.
+ */
+function SignOutConfirmModal({
+  accountName,
+  willPushToLogin,
+  loading,
+  onCancel,
+  onConfirm,
+}: {
+  accountName: string;
+  willPushToLogin: boolean;
+  loading: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape" && !loading) onCancel();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel, loading]);
+
+  return (
+    <div
+      onClick={loading ? undefined : onCancel}
+      className="fixed inset-0 z-[200] flex items-end justify-center bg-zinc-950/55 px-4 pb-8 pt-16 backdrop-blur-md sm:items-center sm:p-6"
+      role="alertdialog"
+      aria-modal="true"
+      aria-label="Sign out account"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative w-full max-w-sm overflow-hidden rounded-3xl border border-white/10 bg-white/95 shadow-2xl shadow-zinc-900/30 backdrop-blur-xl dark:border-white/5 dark:bg-zinc-900/95"
+      >
+        {/* Decorative orange/red tint strip */}
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-amber-500/15 via-orange-500/10 to-transparent" />
+
+        {/* Sign out icon badge */}
+        <div className="relative flex justify-center pt-7">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 shadow-lg shadow-orange-500/30 ring-4 ring-white/80 dark:ring-zinc-900/80">
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+          </div>
+        </div>
+
+        <div className="relative px-6 pb-6 pt-4 text-center">
+          <h2 className="text-[17px] font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
+            Sign out account?
+          </h2>
+          <p className="mt-2 text-[13.5px] leading-relaxed text-zinc-600 dark:text-zinc-400">
+            Are you sure you want to sign out{" "}
+            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+              {accountName}
+            </span>{" "}
+            from Telegram?
+          </p>
+          <p className="mt-1 text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-500">
+            {willPushToLogin
+              ? "You'll be returned to the sign-in screen. The account remains bound to this access code."
+              : "The active session will be cleared, and the account remains bound to this access code."}
+          </p>
+
+          <div className="mt-5 flex gap-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={loading}
+              className="flex-1 rounded-xl bg-zinc-100 px-4 py-2.5 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-200 active:scale-[0.98] disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onConfirm}
+              disabled={loading}
+              className="flex flex-1 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm shadow-orange-500/30 transition hover:opacity-90 active:scale-[0.98] disabled:opacity-60"
+            >
+              {loading ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  Signing out…
+                </span>
+              ) : (
+                "Sign Out"
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [step, setStep] = useState<Step>("phone");
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -359,6 +469,16 @@ export default function Home() {
     | null
   >(null);
   const [removing, setRemoving] = useState(false);
+  /** Premium signout-confirm dialog state. Null = hidden. */
+  const [signOutConfirm, setSignOutConfirm] = useState<
+    | {
+        accountId: string;
+        name: string;
+        willPushToLogin: boolean;
+      }
+    | null
+  >(null);
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     async function initSession() {
@@ -633,8 +753,8 @@ export default function Home() {
     }
   }
 
-  async function handleSignOut() {
-    setLoading(true);
+  async function confirmSignOut() {
+    setSigningOut(true);
     try {
       await fetch("/api/telegram/sign-out", {
         method: "POST",
@@ -642,24 +762,26 @@ export default function Home() {
         body: JSON.stringify({ sessionString }),
       });
     } finally {
-      const nextAccounts = accounts.filter(
-        (account) => account.id !== currentAccountId
+      const nextAccounts = accounts.map((account) =>
+        account.id === currentAccountId
+          ? { ...account, session: "" }
+          : account
       );
-      const nextAccount = nextAccounts[0];
+      const activeFallbackAccount = nextAccounts.find((acc) => acc.session !== "");
 
       setAccounts(nextAccounts);
-      if (nextAccount) {
-        setUser(nextAccount.user);
-        setSessionString(nextAccount.session);
-        setCurrentAccountId(nextAccount.id);
+      if (activeFallbackAccount) {
+        setUser(activeFallbackAccount.user);
+        setSessionString(activeFallbackAccount.session);
+        setCurrentAccountId(activeFallbackAccount.id);
         setStep("done");
-        writeStoredAccounts(nextAccounts, nextAccount.id, activeAccessCode);
+        writeStoredAccounts(nextAccounts, activeFallbackAccount.id, activeAccessCode);
       } else {
         // Logout: just reset to the login screen — do NOT call
         // startAddAccount() here because that checks the account-limit
         // and would show the "limit reached" modal, which is only meant
         // for when the user explicitly tries to add a new account.
-        writeStoredAccounts([], "", activeAccessCode);
+        writeStoredAccounts(nextAccounts, "", activeAccessCode);
         setUser(null);
         setSessionString("");
         setPhoneNumber("");
@@ -669,8 +791,30 @@ export default function Home() {
         setIsAddingAccount(false);
         setStep("phone");
       }
-      setLoading(false);
+      setSigningOut(false);
+      setSignOutConfirm(null);
     }
+  }
+
+  function handleSignOutConfirm() {
+    const account = accounts.find((a) => a.id === currentAccountId);
+    if (!account) return;
+    const name =
+      [account.user.firstName, account.user.lastName]
+        .filter(Boolean)
+        .join(" ") ||
+      account.user.username ||
+      account.user.phone ||
+      "this account";
+
+    const activeAccountsCount = accounts.filter((a) => a.session !== "").length;
+    const willPushToLogin = activeAccountsCount <= 1;
+
+    setSignOutConfirm({
+      accountId: account.id,
+      name,
+      willPushToLogin,
+    });
   }
 
   /**
@@ -845,12 +989,32 @@ export default function Home() {
 
   function handleSwitchAccount(accountId: string) {
     const account = accounts.find((item) => item.id === accountId);
+    if (!account) return;
+
+    if (!account.session) {
+      // Transition to login flow for this account, pre-filling its phone number
+      setPhoneNumber(account.user.phone ?? "");
+      setPhoneCode("");
+      setPhoneCodeHash("");
+      setPassword("");
+      setIsAddingAccount(true); // Treat as adding/re-signing in an account
+      setUser(null);
+      setSessionString("");
+      setStep("phone");
+      // Update the current account ID preference to this account so that
+      // once signed in, it becomes the active account.
+      const currentAccountKey = activeAccessCode
+        ? `telegram_current_account_id_${activeAccessCode}`
+        : CURRENT_ACCOUNT_KEY;
+      localStorage.setItem(currentAccountKey, account.id);
+      return;
+    }
+
     if (
-      !account ||
-      (account.id === currentAccountId &&
-        step === "done" &&
-        user !== null &&
-        sessionString === account.session)
+      account.id === currentAccountId &&
+      step === "done" &&
+      user !== null &&
+      sessionString === account.session
     ) {
       return;
     }
@@ -886,7 +1050,7 @@ export default function Home() {
             currentAccountId={currentAccountId}
             onSwitchAccount={handleSwitchAccount}
             onAddAccount={startAddAccount}
-            onSignOut={handleSignOut}
+            onSignOut={handleSignOutConfirm}
             onRemoveAccount={handleRemoveAccount}
             onLogoutAccessCode={handleLogoutAccessCode}
           />
@@ -895,6 +1059,17 @@ export default function Home() {
           <AccessBlockedModal
             payload={blockedModal}
             onClose={() => setBlockedModal(null)}
+          />
+        )}
+        {signOutConfirm && (
+          <SignOutConfirmModal
+            accountName={signOutConfirm.name}
+            willPushToLogin={signOutConfirm.willPushToLogin}
+            loading={signingOut}
+            onCancel={() => {
+              if (!signingOut) setSignOutConfirm(null);
+            }}
+            onConfirm={confirmSignOut}
           />
         )}
         {removeConfirm && (
@@ -936,6 +1111,17 @@ export default function Home() {
             if (!removing) setRemoveConfirm(null);
           }}
           onConfirm={confirmRemoveAccount}
+        />
+      )}
+      {signOutConfirm && (
+        <SignOutConfirmModal
+          accountName={signOutConfirm.name}
+          willPushToLogin={signOutConfirm.willPushToLogin}
+          loading={signingOut}
+          onCancel={() => {
+            if (!signingOut) setSignOutConfirm(null);
+          }}
+          onConfirm={confirmSignOut}
         />
       )}
       <div className="w-full max-w-sm">
@@ -1093,10 +1279,6 @@ export default function Home() {
                   account.user.username ||
                   account.user.phone ||
                   "User";
-                const initials =
-                  (account.user.firstName?.[0] ?? "") +
-                    (account.user.lastName?.[0] ?? "") || "U";
-
                 return (
                   <button
                     key={account.id}
@@ -1104,10 +1286,8 @@ export default function Home() {
                     onClick={() => handleSwitchAccount(account.id)}
                     className="flex w-full min-w-0 items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
                   >
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 text-xs font-bold text-white">
-                      {initials}
-                    </div>
-                    <div className="min-w-0">
+                    <AccountAvatar account={account} />
+                    <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
                         {name}
                       </p>
@@ -1117,6 +1297,11 @@ export default function Home() {
                         </p>
                       )}
                     </div>
+                    {!account.session && (
+                      <span className="text-[10px] text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-md font-medium shrink-0">
+                        Not signed in
+                      </span>
+                    )}
                   </button>
                 );
               })}

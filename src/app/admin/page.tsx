@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AccountAvatar } from "@/components/Header";
 
 const PAGE_SIZE = 20;
 
@@ -10,6 +11,7 @@ interface LinkedTelegramAccount {
   first_name: string | null;
   last_name: string | null;
   username: string | null;
+  session?: string | null;
 }
 
 interface AccessCode {
@@ -144,7 +146,8 @@ export default function AdminDashboard() {
     setFormAccountLimit(
       code.account_limit != null ? String(code.account_limit) : "",
     );
-    setFormCustomCode("");
+    const suffix = code.code.startsWith("VIP-") ? code.code.substring(4) : code.code;
+    setFormCustomCode(suffix);
     setFormError("");
     setShowGenerateModal(true);
   }
@@ -190,7 +193,8 @@ export default function AdminDashboard() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          ...(isEdit ? { id: editingId } : { code: formCustomCode }),
+          ...(isEdit ? { id: editingId } : {}),
+          code: formCustomCode,
           first_name: formFirstName,
           last_name: formLastName,
           phone_number: formPhone,
@@ -640,28 +644,27 @@ export default function AdminDashboard() {
               </button>
             </div>
 
-            {!editingId && (
-              <div className="mb-3">
-                <label className="mb-1.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
-                  Custom Access Code Suffix (Optional)
-                </label>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-mono font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 select-none">
-                    VIP-
-                  </span>
-                  <input
-                    type="text"
-                    value={formCustomCode}
-                    onChange={(e) => setFormCustomCode(e.target.value.replace(/[^A-Za-z0-9_-]/g, "").toUpperCase())}
-                    placeholder="Auto-generated if empty"
-                    className="flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white font-mono uppercase"
-                  />
-                </div>
-                <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500">
-                  Only letters, numbers, dashes (-), and underscores (_) are allowed.
-                </p>
+            <div className="mb-3">
+              <label className="mb-1.5 block text-xs font-medium text-zinc-600 dark:text-zinc-400">
+                {editingId ? "Access Code Suffix" : "Custom Access Code Suffix (Optional)"}
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-mono font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 select-none">
+                  VIP-
+                </span>
+                <input
+                  type="text"
+                  value={formCustomCode}
+                  onChange={(e) => setFormCustomCode(e.target.value.replace(/[^A-Za-z0-9_-]/g, "").toUpperCase())}
+                  placeholder={editingId ? "Required" : "Auto-generated if empty"}
+                  required={!!editingId}
+                  className="flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white font-mono uppercase"
+                />
               </div>
-            )}
+              <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500">
+                Only letters, numbers, dashes (-), and underscores (_) are allowed.
+              </p>
+            </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -826,9 +829,19 @@ export default function AdminDashboard() {
                       className="flex items-center justify-between rounded-xl border border-zinc-100 bg-zinc-50/50 p-4 transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:bg-zinc-800/40"
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-linear-to-br from-violet-500 to-fuchsia-500 text-xs font-bold text-white uppercase shadow-md select-none">
-                          {initials}
-                        </div>
+                        <AccountAvatar
+                          account={{
+                            id: acc.telegram_id,
+                            session: acc.session || "",
+                            user: {
+                              id: acc.telegram_id,
+                              firstName: acc.first_name || undefined,
+                              lastName: acc.last_name || undefined,
+                              username: acc.username || undefined,
+                              phone: acc.phone || undefined,
+                            },
+                          }}
+                        />
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-zinc-800 dark:text-zinc-200">
                             {name}

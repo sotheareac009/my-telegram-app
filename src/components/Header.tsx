@@ -133,15 +133,17 @@ function InitialsAvatar({
   );
 }
 
-function AccountAvatar({ account }: { account: TelegramAccount }) {
+export function AccountAvatar({ account }: { account: TelegramAccount }) {
   // Seed from cache so there's no flash on remount (e.g. reopening the dropdown).
   const [photoUrl, setPhotoUrl] = useState<string | null>(
-    () => photoCache.get(account.session) ?? null
+    () => account.session ? (photoCache.get(account.session) ?? null) : null
   );
   const [photoFailed, setPhotoFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+
+    if (!account.session) return;
 
     // Already cached — nothing to do.
     if (photoCache.has(account.session)) return;
@@ -217,6 +219,48 @@ export default function Header({
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
+
+  const [otherUnreadCounts, setOtherUnreadCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    let active = true;
+
+    async function fetchOtherUnreadCounts() {
+      const counts: Record<string, number> = {};
+      const promises = accounts
+        .filter((acc) => acc.id !== currentAccountId && acc.session)
+        .map(async (acc) => {
+          try {
+            const res = await fetch("/api/telegram/unread-counts", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sessionString: acc.session }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (active) {
+                counts[acc.id] = (data.users ?? 0) + (data.groups ?? 0) + (data.channels ?? 0);
+              }
+            }
+          } catch (err) {
+            console.warn(`Failed to fetch unread counts for account ${acc.id}:`, err);
+          }
+        });
+
+      await Promise.all(promises);
+      if (active) {
+        setOtherUnreadCounts(counts);
+      }
+    }
+
+    if (accounts.length > 0) {
+      fetchOtherUnreadCounts();
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [accounts, currentAccountId]);
 
   useEffect(() => {
     applyThemeMode(themeMode);
@@ -423,7 +467,7 @@ export default function Header({
           </button>
 
           {open && (
-            <div className="absolute right-0 top-full z-[60] mt-2 w-64 overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-2xl shadow-zinc-200/60 dark:border-zinc-700/60 dark:bg-zinc-900 dark:shadow-black/40">
+            <div className="absolute right-0 top-full z-[60] mt-2 w-80 overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-2xl shadow-zinc-200/60 dark:border-zinc-700/60 dark:bg-zinc-900 dark:shadow-black/40">
               {/* Current user */}
               <div className="flex items-center gap-3 border-b border-zinc-100 px-4 py-3.5 dark:border-zinc-800">
                 {profileAvatar}
@@ -545,71 +589,115 @@ export default function Header({
                   <div className="max-h-48 overflow-y-auto">
                     {accounts.map((account) => {
                       const isCurrent = account.id === currentAccountId;
+                      const otherUnread = otherUnreadCounts[account.id] ?? 0;
                       return (
                         <div
                           key={account.id}
-                          className={`group relative flex w-full min-w-0 items-center rounded-xl pr-1 transition-colors ${isCurrent ? "bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300" : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800/60"}`}
+                          className={`group flex flex-col w-full min-w-0 rounded-xl transition-colors ${isCurrent ? "bg-blue-50/50 dark:bg-blue-950/20" : "text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800/60"}`}
                         >
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setOpen(false);
-                              onSwitchAccount(account.id);
-                            }}
-                            className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2 text-left"
-                          >
-                            <AccountAvatar account={account} />
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-[13px] font-medium">
-                                {getDisplayName(account.user)}
-                              </p>
-                              {account.user.username && (
-                                <p className="truncate text-xs text-zinc-400">
-                                  @{account.user.username}
-                                </p>
-                              )}
-                            </div>
-                            {isCurrent && (
-                              <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" />
-                            )}
-                          </button>
-                          {/* Unlink from access code — invalidates the
-                              Telegram session AND removes the link row so
-                              the slot is freed up for someone else.
-                              Always rendered; the handler takes care of
-                              the live-session case by either auto-switching
-                              to another account (if any) or navigating to
-                              the phone-login form (if this was the last
-                              one) BEFORE the API call tears the session
-                              down. */}
-                          <button
-                            type="button"
-                            title="Remove from access code"
-                            aria-label={`Remove ${getDisplayName(account.user)} from this access code`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setOpen(false);
-                              onRemoveAccount(account.id);
-                            }}
-                            className="ml-1 flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-zinc-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 focus:opacity-100 dark:hover:bg-red-950/40 dark:hover:text-red-400"
-                          >
-                            <svg
-                              width="14"
-                              height="14"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
+                          <div className="relative flex w-full items-center pr-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpen(false);
+                                onSwitchAccount(account.id);
+                              }}
+                              className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2 text-left ${isCurrent ? "text-blue-700 dark:text-blue-300" : ""}`}
                             >
-                              <polyline points="3 6 5 6 21 6" />
-                              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                              <path d="M10 11v6" />
-                              <path d="M14 11v6" />
-                              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                            </svg>
-                          </button>
+                              <AccountAvatar account={account} />
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-[13px] font-medium">
+                                  {getDisplayName(account.user)}
+                                </p>
+                                {account.user.username && (
+                                  <p className="truncate text-xs text-zinc-400">
+                                    @{account.user.username}
+                                  </p>
+                                )}
+                              </div>
+                              {!account.session ? (
+                                <span className="text-[10px] text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-md font-medium shrink-0">
+                                  Not signed in
+                                </span>
+                              ) : (
+                                <>
+                                  {!isCurrent && otherUnread > 0 && (
+                                    <span className="mr-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500 px-1 text-[9px] font-bold text-white shadow-xs">
+                                      {otherUnread}
+                                    </span>
+                                  )}
+                                  {isCurrent && (
+                                    <span className="h-2 w-2 shrink-0 rounded-full bg-blue-500" />
+                                  )}
+                                </>
+                              )}
+                            </button>
+                            {/* Unlink from access code — invalidates the
+                                Telegram session AND removes the link row so
+                                the slot is freed up for someone else.
+                                Always rendered; the handler takes care of
+                                the live-session case by either auto-switching
+                                to another account (if any) or navigating to
+                                the phone-login form (if this was the last
+                                one) BEFORE the API call tears the session
+                                down. */}
+                            <button
+                              type="button"
+                              title="Remove from access code"
+                              aria-label={`Remove ${getDisplayName(account.user)} from this access code`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpen(false);
+                                onRemoveAccount(account.id);
+                              }}
+                              className="ml-1 flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-zinc-400 opacity-0 transition-all hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 focus:opacity-100 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                            >
+                              <svg
+                                width="14"
+                                height="14"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polyline points="3 6 5 6 21 6" />
+                                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                                <path d="M10 11v6" />
+                                <path d="M14 11v6" />
+                                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                              </svg>
+                            </button>
+                          </div>
+                          {isCurrent && account.session && (
+                            <div className="px-3 pb-2 pt-0.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOpen(false);
+                                  onSignOut();
+                                }}
+                                className="cursor-pointer flex w-full items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50/50 py-1 text-xs font-semibold text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-400 dark:hover:bg-red-950/30"
+                              >
+                                <svg
+                                  width="12"
+                                  height="12"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.5"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                                  <polyline points="16 17 21 12 16 7" />
+                                  <line x1="21" y1="12" x2="9" y2="12" />
+                                </svg>
+                                Sign out of Telegram
+                              </button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -643,31 +731,7 @@ export default function Header({
                   </div>
                   Add account
                 </button>
-                <button
-                  onClick={() => {
-                    setOpen(false);
-                    onSignOut();
-                  }}
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm text-red-500 transition-colors hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
-                >
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-red-50 dark:bg-red-950/40">
-                    <svg
-                      width="13"
-                      height="13"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                      <polyline points="16 17 21 12 16 7" />
-                      <line x1="21" y1="12" x2="9" y2="12" />
-                    </svg>
-                  </div>
-                  Sign out
-                </button>
+
                 <button
                   onClick={() => {
                     setOpen(false);

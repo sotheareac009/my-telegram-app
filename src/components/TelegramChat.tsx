@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useState, useRef, useEffect, useLayoutEffect } from "react";
+import { Fragment, useCallback, useMemo, useState, useRef, useEffect, useLayoutEffect } from "react";
 import { useChatNav, telegramLinkTarget } from "./ChatNavContext";
 import { useForwardJobs } from "./ForwardJobsContext";
 import DialogAvatar from "./DialogAvatar";
@@ -2388,6 +2388,165 @@ export default function TelegramChat({
         if (!onDeleteMessage && !sessionString) return;
         setMenu({ x: clientX, y: clientY, ids });
     }
+
+    // ── Reactions ─────────────────────────────────────────────────────────
+    // Quick-react emojis shown along the top of the context menu — same set
+    // and order Telegram Web defaults to.
+    const REACTION_EMOJIS = ["❤️", "👍", "🔥", "🎉", "😂", "😮", "😢", "🤔"];
+    /** Floating-emoji animation state. Set when the user picks a reaction
+     * so the chosen emoji pops up at the click point; cleared by setTimeout
+     * after the animation finishes (~820ms). */
+    const [reactionAnim, setReactionAnim] = useState<{
+        emoji: string;
+        x: number;
+        y: number;
+    } | null>(null);
+    /** Optimistic reactions, keyed by message id → emoji the user just
+     * picked. The reaction chip is merged onto the bubble immediately so
+     * the user sees feedback without waiting for the next conversation
+     * poll. Cleared per-id by the effect below once the server's
+     * `messages` reflect the same reaction with `chosen: true`. */
+    const [pendingReactions, setPendingReactions] = useState<
+        Record<string, string>
+    >({});
+
+    // Once the polled `messages` confirm a pending reaction, drop it from
+    // the optimistic map so we stop double-counting it.
+    useEffect(() => {
+        setPendingReactions((prev) => {
+            const next: Record<string, string> = {};
+            let kept = 0;
+            for (const [msgId, emoji] of Object.entries(prev)) {
+                const m = messages.find((x) => x.id === msgId);
+                const confirmed = m?.reactions?.some(
+                    (r) => r.emoji === emoji && r.chosen,
+                );
+                if (!confirmed) {
+                    next[msgId] = emoji;
+                    kept++;
+                }
+            }
+            // Avoid causing a re-render when nothing actually changed.
+            const prevSize = Object.keys(prev).length;
+            return kept === prevSize ? prev : next;
+        });
+    }, [messages]);
+
+    async function handleReact(
+        messageId: string,
+        emoji: string,
+        x: number,
+        y: number,
+    ) {
+        if (!sessionString) return;
+        // Optimistic UI update — render the reaction chip on the bubble
+        // immediately. The effect above will clear this entry once the
+        // next poll confirms it server-side.
+        setPendingReactions((prev) => ({ ...prev, [messageId]: emoji }));
+        // Kick the floating-emoji animation. The animation takes 820ms —
+        // match that to the cleanup timeout.
+        setReactionAnim({ emoji, x, y });
+        setTimeout(() => {
+            setReactionAnim((cur) =>
+                cur && cur.x === x && cur.y === y ? null : cur,
+            );
+        }, 820);
+
+        const target = isGroup
+            ? { chatId: contact.id }
+            : { userId: contact.id, accessHash: contact.accessHash };
+
+        try {
+            const res = await fetch("/api/telegram/react", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    sessionString,
+                    ...target,
+                    messageId,
+                    emoji,
+                }),
+            });
+            if (!res.ok) {
+                // Server rejected (e.g. admins disabled reactions). Roll
+                // back the optimistic chip so the UI doesn't lie.
+                setPendingReactions((prev) => {
+                    if (prev[messageId] !== emoji) return prev;
+                    const next = { ...prev };
+                    delete next[messageId];
+                    return next;
+                });
+            }
+        } catch {
+            // Network blip — same rollback, same reasoning.
+            setPendingReactions((prev) => {
+                if (prev[messageId] !== emoji) return prev;
+                const next = { ...prev };
+                delete next[messageId];
+                return next;
+            });
+        }
+    }
+
+    /** `messages` with any pending optimistic reaction merged onto each
+     * bubble's `reactions` field. Bubble doesn't know about pending state —
+     * it just sees a normal MessageReaction[] and renders it. Once the
+     * server confirms the reaction (via the next conversation poll), the
+     * pending entry is cleared and this becomes a no-op pass-through.
+     *
+     * Telegram allows one reaction per user per message — so when the user
+     * picks a NEW emoji while already having reacted to that message, we
+     * also need to optimistically REMOVE their prior chosen reaction. Without
+     * this, the bubble briefly shows both (old + new) until the next poll
+     * reconciles to just the new one. */
+    const messagesForRender = useMemo(() => {
+        if (Object.keys(pendingReactions).length === 0) return messages;
+        return messages.map((m) => {
+            const pending = pendingReactions[m.id];
+            if (!pending) return m;
+            const server = m.reactions ?? [];
+
+            // 1. Drop the user's previously-chosen reaction (if any) since
+            //    they're switching to a new emoji. If others had reacted
+            //    with it too, decrement count & flip `chosen` off; if the
+            //    user was the only reactor, drop the entry entirely.
+            const cleaned: MessageReaction[] = [];
+            for (const r of server) {
+                if (r.chosen && r.emoji !== pending) {
+                    if (r.count > 1) {
+                        cleaned.push({
+                            ...r,
+                            count: r.count - 1,
+                            chosen: false,
+                        });
+                    }
+                    // count === 1 → drop entirely
+                } else {
+                    cleaned.push(r);
+                }
+            }
+
+            // 2. Add (or mark chosen) the new emoji.
+            const idx = cleaned.findIndex((r) => r.emoji === pending);
+            let nextReactions: MessageReaction[];
+            if (idx === -1) {
+                nextReactions = [
+                    { emoji: pending, count: 1, chosen: true },
+                    ...cleaned,
+                ];
+            } else if (cleaned[idx].chosen) {
+                nextReactions = cleaned;
+            } else {
+                nextReactions = [...cleaned];
+                nextReactions[idx] = {
+                    ...nextReactions[idx],
+                    chosen: true,
+                    count: nextReactions[idx].count + 1,
+                };
+            }
+            return { ...m, reactions: nextReactions };
+        });
+    }, [messages, pendingReactions]);
     useEffect(() => {
         if (!menu) return;
         function onKey(e: KeyboardEvent) {
@@ -2465,7 +2624,7 @@ export default function TelegramChat({
     const emojiPickerRef = useRef<HTMLDivElement>(null);
     const swipeStartRef = useRef<{ x: number; y: number } | null>(null);
     const swipeBackTriggeredRef = useRef(false);
-    const grouped = groupMessagesByDate(messages);
+    const grouped = groupMessagesByDate(messagesForRender);
 
     function resizeInput(el: HTMLTextAreaElement) {
         el.style.height = "auto";
@@ -3117,6 +3276,32 @@ export default function TelegramChat({
                             top: Math.min(menu.y, window.innerHeight - 60),
                         }}
                     >
+                        {/* Quick reactions — only for single-message
+                            selections; Telegram doesn't support reacting
+                            to multiple messages at once. */}
+                        {sessionString && menu.ids.length === 1 && (
+                            <div className="flex items-center gap-0.5 border-b border-zinc-100 px-1.5 py-1 dark:border-zinc-800">
+                                {REACTION_EMOJIS.map((emoji) => (
+                                    <button
+                                        key={emoji}
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            const id = menu.ids[0];
+                                            const x = menu.x;
+                                            const y = menu.y;
+                                            setMenu(null);
+                                            void handleReact(id, emoji, x, y);
+                                        }}
+                                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-base transition-transform hover:scale-125 active:scale-110"
+                                        aria-label={`React with ${emoji}`}
+                                        title={`React with ${emoji}`}
+                                    >
+                                        {emoji}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
                         {menuTexts.length > 0 && (
                             <button
                                 type="button"
@@ -3225,6 +3410,20 @@ export default function TelegramChat({
                         );
                     })()}
                 </>
+            )}
+
+            {/* ── Floating reaction-pop animation ─────────────────────
+                Renders the chosen emoji at the click coordinates and lets
+                CSS keyframes float + scale + fade it. Self-cleans via the
+                setTimeout in handleReact, so no exit handling needed. */}
+            {reactionAnim && (
+                <div
+                    className="reaction-pop pointer-events-none fixed z-[60] text-4xl drop-shadow-lg"
+                    style={{ left: reactionAnim.x, top: reactionAnim.y }}
+                    aria-hidden="true"
+                >
+                    {reactionAnim.emoji}
+                </div>
             )}
 
             {/* ── Forward destination picker ── */}

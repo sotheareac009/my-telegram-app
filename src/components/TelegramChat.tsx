@@ -11,35 +11,12 @@ import type {
     LinkPreview,
     TextEntity,
     MessageReaction,
+    ChatMedia,
 } from "@/app/api/telegram/conversation/route";
 import { Copy, Check } from "lucide-react";
 import { EMOJI_CATEGORIES, gradients, SENDER_COLORS } from "@/constant";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-interface ChatMedia {
-    kind:
-    | "photo"
-    | "video"
-    | "sticker"
-    | "gif"
-    | "voice"
-    | "audio"
-    | "file"
-    | "contact";
-    /** Inline low-res preview (base64 JPEG data URL). */
-    thumb?: string;
-    fileName?: string;
-    fileSize?: number;
-    mimeType?: string;
-    duration?: number;
-    width?: number;
-    height?: number;
-    /** Shared-contact fields (kind === "contact"). */
-    contactUserId?: string;
-    contactFirstName?: string;
-    contactLastName?: string;
-    contactPhone?: string;
-}
 
 interface Message {
     id: string;
@@ -679,11 +656,97 @@ function MediaContent({
         );
     }
 
+    if (media?.kind === "location") {
+        return <LocationCard media={media} />;
+    }
+
     if (media?.kind === "contact") {
         return <ContactCard media={media} />;
     }
 
-    // file / document
+    // file / document — image or video files get an inline preview + open button
+    const mime = media.mimeType || "";
+    if (mime.startsWith("image/") && onOpen) {
+        // Image sent as document: show a thumbnail preview that opens the viewer
+        const box = mediaBox(media.width, media.height);
+        return (
+            <div className="flex flex-col gap-1.5">
+                <button type="button" onClick={onOpen} className="block cursor-pointer">
+                    <MediaImage
+                        src={url}
+                        thumb={media.thumb}
+                        alt={media.fileName || "Image"}
+                        className="block rounded-lg object-cover"
+                        style={{ width: box.width, height: box.height }}
+                    />
+                </button>
+                {/* File name + size row below the image */}
+                <div className="flex items-center gap-1.5 px-0.5">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" className="shrink-0 text-[#8a9aaa]">
+                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M14 2v6h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <span className="truncate text-[11px] text-[#8a9aaa] dark:text-zinc-400">
+                        {media.fileName || "Image file"}
+                        {media.fileSize ? ` · ${formatFileSize(media.fileSize)}` : ""}
+                    </span>
+                    <a
+                        href={downloadUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="ml-auto shrink-0 text-[11px] font-medium text-[#3390ec] hover:underline"
+                    >
+                        Save
+                    </a>
+                </div>
+            </div>
+        );
+    }
+
+    if (mime.startsWith("video/") && onOpen) {
+        // Video sent as document: show poster + play badge
+        const box = mediaBox(media.width, media.height);
+        return (
+            <div className="flex flex-col gap-1.5">
+                <button
+                    type="button"
+                    onClick={onOpen}
+                    className="relative block cursor-pointer overflow-hidden rounded-lg bg-zinc-800"
+                    style={{ width: box.width, height: box.height }}
+                >
+                    <MediaImage
+                        src={thumbUrl}
+                        thumb={media.thumb}
+                        alt={media.fileName || "Video"}
+                        className="h-full w-full object-cover"
+                    />
+                    <PlayBadge />
+                </button>
+                <div className="flex items-center gap-1.5 px-0.5">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" className="shrink-0 text-[#8a9aaa]">
+                        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                        <path d="M14 2v6h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                    <span className="truncate text-[11px] text-[#8a9aaa] dark:text-zinc-400">
+                        {media.fileName || "Video file"}
+                        {media.fileSize ? ` · ${formatFileSize(media.fileSize)}` : ""}
+                    </span>
+                    <a
+                        href={downloadUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="ml-auto shrink-0 text-[11px] font-medium text-[#3390ec] hover:underline"
+                    >
+                        Save
+                    </a>
+                </div>
+            </div>
+        );
+    }
+
+    // Generic file / document — download link
     return (
         <a
             href={downloadUrl}
@@ -746,7 +809,91 @@ function ContactCard({ media }: { media: ChatMedia }) {
     );
 }
 
+// ── Location card ──────────────────────────────────────────────────────────────
+function LocationCard({ media }: { media: ChatMedia }) {
+    const lat = media.lat;
+    const lon = media.lon;
+    if (lat === undefined || lon === undefined) return null;
 
+    const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
+    
+    // Slight bounding box for the iframe
+    const delta = 0.002;
+    const bbox = `${lon - delta}%2C${lat - delta}%2C${lon + delta}%2C${lat + delta}`;
+    const embedUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat}%2C${lon}`;
+
+    return (
+        <a
+            href={mapsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block w-[240px] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950 transition-shadow hover:shadow-md"
+        >
+            {/* Map Container */}
+            <div className="relative h-[130px] w-full bg-zinc-100 dark:bg-zinc-900">
+                <iframe
+                    src={embedUrl}
+                    title="Location Map"
+                    className="h-full w-full border-0 pointer-events-none"
+                    scrolling="no"
+                />
+                
+                {/* Red Pin overlay in center of map */}
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="relative -mt-5">
+                        <svg className="h-8 w-8 text-red-500 drop-shadow-md animate-bounce" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
+                        </svg>
+                    </div>
+                </div>
+
+                {/* Live location badge */}
+                {media.locationLive && (
+                    <div className="absolute top-2 left-2 flex items-center gap-1.5 rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white shadow-sm">
+                        <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+                        </span>
+                        Live Location
+                    </div>
+                )}
+            </div>
+
+            {/* Info panel */}
+            <div className="p-3 text-left">
+                {media.locationTitle ? (
+                    <>
+                        <h4 className="truncate text-xs font-semibold text-zinc-800 dark:text-zinc-100">
+                            {media.locationTitle}
+                        </h4>
+                        {media.locationAddress && (
+                            <p className="mt-0.5 truncate text-[11px] text-zinc-500 dark:text-zinc-400">
+                                {media.locationAddress}
+                            </p>
+                        )}
+                    </>
+                ) : (
+                    <>
+                        <h4 className="truncate text-xs font-semibold text-zinc-800 dark:text-zinc-100">
+                            Shared Location
+                        </h4>
+                        <p className="mt-0.5 truncate text-[11.5px] font-mono text-zinc-500 dark:text-zinc-400">
+                            {lat.toFixed(6)}, {lon.toFixed(6)}
+                        </p>
+                    </>
+                )}
+                <div className="mt-2 flex items-center justify-between border-t border-zinc-100 pt-2 dark:border-zinc-800">
+                    <span className="text-[11px] font-medium text-[#3390ec] hover:underline">
+                        Open in Google Maps
+                    </span>
+                    <svg className="h-3 w-3 text-[#3390ec]" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                </div>
+            </div>
+        </a>
+    );
+}
 
 function CodeBlock({
     code,

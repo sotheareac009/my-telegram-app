@@ -16,7 +16,8 @@ export type ChatMedia = {
     | "voice"
     | "audio"
     | "file"
-    | "contact";
+    | "contact"
+    | "location";
   /** Inline low-res preview (base64 JPEG data URL) — shows instantly. */
   thumb?: string;
   fileName?: string;
@@ -31,6 +32,15 @@ export type ChatMedia = {
   contactFirstName?: string;
   contactLastName?: string;
   contactPhone?: string;
+  /** Location fields (kind === "location"). */
+  lat?: number;
+  lon?: number;
+  /** Venue title e.g. "Eiffel Tower" (MessageMediaVenue). */
+  locationTitle?: string;
+  /** Venue address e.g. "Champ de Mars, Paris" (MessageMediaVenue). */
+  locationAddress?: string;
+  /** True for live-location shares. */
+  locationLive?: boolean;
 };
 
 /** Telegram webpage/link preview metadata attached to a text message. */
@@ -221,6 +231,10 @@ function classifyMedia(media: Api.TypeMessageMedia): ChatMedia | null {
     else if (isVideo) kind = "video";
     else if (isVoice) kind = "voice";
     else if ((doc.mimeType || "").startsWith("audio/")) kind = "audio";
+    // Images and videos sent "as document" (no compression) — treat them like
+    // native photos/videos so the in-app viewer opens instead of a download.
+    else if ((doc.mimeType || "").startsWith("image/")) kind = "photo";
+    else if ((doc.mimeType || "").startsWith("video/")) kind = "video";
     else kind = "file";
 
     let thumb: string | undefined;
@@ -238,6 +252,36 @@ function classifyMedia(media: Api.TypeMessageMedia): ChatMedia | null {
       width,
       height,
     };
+  }
+
+  if (media instanceof Api.MessageMediaGeo) {
+    const geo = media.geo;
+    if (geo instanceof Api.GeoPoint) {
+      return { kind: "location", lat: geo.lat, lon: geo.long };
+    }
+    return null;
+  }
+
+  if (media instanceof Api.MessageMediaGeoLive) {
+    const geo = media.geo;
+    if (geo instanceof Api.GeoPoint) {
+      return { kind: "location", lat: geo.lat, lon: geo.long, locationLive: true };
+    }
+    return null;
+  }
+
+  if (media instanceof Api.MessageMediaVenue) {
+    const geo = media.geo;
+    if (geo instanceof Api.GeoPoint) {
+      return {
+        kind: "location",
+        lat: geo.lat,
+        lon: geo.long,
+        locationTitle: media.title || undefined,
+        locationAddress: media.address || undefined,
+      };
+    }
+    return null;
   }
 
   return null;

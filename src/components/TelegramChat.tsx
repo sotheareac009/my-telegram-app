@@ -10,6 +10,7 @@ import type {
     ForwardInfo,
     LinkPreview,
     TextEntity,
+    MessageReaction,
 } from "@/app/api/telegram/conversation/route";
 import { Copy, Check } from "lucide-react";
 import { EMOJI_CATEGORIES, gradients, SENDER_COLORS } from "@/constant";
@@ -58,6 +59,8 @@ interface Message {
     linkPreview?: LinkPreview;
     /** Code / pre formatting spans from Telegram's message entities. */
     entities?: TextEntity[];
+    /** Emoji reactions on this message. */
+    reactions?: MessageReaction[];
 }
 
 /** A chat the user can forward messages to (from /api/telegram/dialogs). */
@@ -1159,6 +1162,82 @@ function LinkPreviewCard({
     );
 }
 
+// ── Reactions bar ──────────────────────────────────────────────────────────────
+/**
+ * Renders Telegram-style reaction pills.
+ * Chosen reactions: solid Telegram-blue pill with white text.
+ * Unchosen reactions: translucent dark/light glass pill with emoji + count.
+ * Pills float just outside the bubble bottom edge.
+ */
+function ReactionsBar({
+    reactions,
+    fromMe,
+}: {
+    reactions: MessageReaction[];
+    fromMe: boolean;
+}) {
+    if (!reactions || reactions.length === 0) return null;
+    return (
+        <div
+            className={`flex flex-wrap gap-1 ${
+                fromMe ? "justify-end" : "justify-start"
+            }`}
+        >
+            {reactions.map((r) => (
+                <span
+                    key={r.emoji}
+                    title={`${r.count} reaction${r.count !== 1 ? "s" : ""}`}
+                    className={`
+                        group
+                        inline-flex items-center gap-[5px]
+                        rounded-full
+                        h-[26px] px-[9px]
+                        select-none cursor-default
+                        transition-transform duration-100
+                        active:scale-95
+                        ${
+                            r.chosen
+                                ? [
+                                    /* Telegram's chosen-reaction blue */
+                                    "bg-[#3390ec] dark:bg-[#2b7fd4]",
+                                    "shadow-[0_1px_4px_rgba(51,144,236,0.45)]",
+                                  ].join(" ")
+                                : [
+                                    /* Glassy frosted pill — adapts to light/dark */
+                                    "bg-[rgba(0,0,0,0.08)] dark:bg-[rgba(255,255,255,0.10)]",
+                                    "ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.08]",
+                                    "shadow-[0_1px_3px_rgba(0,0,0,0.12)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.3)]",
+                                  ].join(" ")
+                        }
+                    `}
+                >
+                    {/* Emoji — rendered at a larger size than surrounding text */}
+                    <span
+                        className="leading-none"
+                        style={{ fontSize: 16, lineHeight: 1 }}
+                        aria-hidden
+                    >
+                        {r.emoji}
+                    </span>
+
+                    {/* Count */}
+                    <span
+                        className={`
+                            text-[12.5px] font-semibold leading-none tabular-nums
+                            ${
+                                r.chosen
+                                    ? "text-white"
+                                    : "text-[#111] dark:text-zinc-100"
+                            }
+                        `}
+                    >
+                        {r.count}
+                    </span>
+                </span>
+            ))}
+        </div>
+    );
+}
 
 // ── Sender label (group chat) ──────────────────────────────────────────────────
 function SenderLabel({ msg }: { msg: Message }) {
@@ -1436,75 +1515,88 @@ function Bubble({
 
     return (
         <div className={`flex ${msg?.fromMe ? "justify-end" : "justify-start"} mb-1`}>
-            <div
-                {...actionHandlers}
-                className={`
-                    relative max-w-[75%] rounded-2xl text-sm leading-relaxed
-                    ${isVisualMedia ? "overflow-hidden p-1" : "px-3 py-2"}
-                    ${msg?.fromMe
-                        ? "bg-[#effdde] dark:bg-[#2b5278] text-[#111] dark:text-zinc-100 rounded-br-sm shadow-sm"
-                        : "bg-white dark:bg-zinc-900 text-[#111] dark:text-zinc-100 rounded-bl-sm shadow-sm"
-                    }
-                `}
-                style={{ wordBreak: "break-word" }}
-            >
-                {msg?.forwardedFrom && (
-                    <ForwardLabel
-                        info={msg.forwardedFrom}
-                        session={sessionString}
-                        padded={isVisualMedia}
-                    />
-                )}
-                {showSender && (
-                    <span className={isVisualMedia ? "block p-1" : ""}>
-                        <SenderLabel msg={msg} />
-                    </span>
-                )}
-                {media && (
-                    <div className={isVisualMedia ? "relative" : ""}>
-                        <MediaContent
-                            media={media}
-                            url={mediaUrl(msg?.id)}
-                            downloadUrl={mediaUrl(msg?.id, { download: true })}
-                            thumbUrl={mediaUrl(msg?.id, { thumb: true })}
-                            onOpen={openSelf}
-                        />
-                        {/* For caption-less visual media, overlay the time?. */}
-                        {isVisualMedia && !msg?.text && (
-                            <span className="absolute bottom-1.5 right-1.5 rounded-full bg-black/40 px-1.5 py-0.5 text-[10px] leading-none text-white select-none">
-                                {formatTime(msg?.timestamp)}
-                                {msg?.fromMe && <Ticks status={msg?.status} />}
-                            </span>
-                        )}
-                    </div>
-                )}
-                {msg?.text && (
-                    <span
-                        className={`whitespace-pre-wrap ${isVisualMedia ? "mt-1 block px-2 pb-1" : ""
-                            }`}
-                    >
-                        <MessageText text={msg?.text} entities={msg?.entities} />
-                    </span>
-                )}
-                {msg?.linkPreview && (
-                    <LinkPreviewCard
-                        preview={msg.linkPreview}
-                        imageUrl={
-                            (msg.linkPreview.hasImage || !!msg.linkPreview.thumb)
-                                ? mediaUrl(msg.id, { thumb: true })
-                                : undefined
+            {/* Column wrapper — constrains width AND stacks bubble + reactions */}
+            <div className={`flex max-w-[75%] flex-col ${msg?.fromMe ? "items-end" : "items-start"}`}>
+                {/* ── The chat bubble ── */}
+                <div
+                    {...actionHandlers}
+                    className={`
+                        relative w-full rounded-2xl text-sm leading-relaxed
+                        ${isVisualMedia ? "overflow-hidden p-1" : "px-3 py-2"}
+                        ${msg?.fromMe
+                            ? "bg-[#effdde] dark:bg-[#2b5278] text-[#111] dark:text-zinc-100 rounded-br-sm shadow-sm"
+                            : "bg-white dark:bg-zinc-900 text-[#111] dark:text-zinc-100 rounded-bl-sm shadow-sm"
                         }
-                    />
-                )}
-                {(!isVisualMedia || msg?.text) && (
-                    <span className={isVisualMedia ? "block px-2 pb-1 text-right" : "float-right mt-1 -mb-0.5"}>
-                        {metaRow}
-                    </span>
+                    `}
+                    style={{ wordBreak: "break-word" }}
+                >
+                    {msg?.forwardedFrom && (
+                        <ForwardLabel
+                            info={msg.forwardedFrom}
+                            session={sessionString}
+                            padded={isVisualMedia}
+                        />
+                    )}
+                    {showSender && (
+                        <span className={isVisualMedia ? "block p-1" : ""}>
+                            <SenderLabel msg={msg} />
+                        </span>
+                    )}
+                    {media && (
+                        <div className={isVisualMedia ? "relative" : ""}>
+                            <MediaContent
+                                media={media}
+                                url={mediaUrl(msg?.id)}
+                                downloadUrl={mediaUrl(msg?.id, { download: true })}
+                                thumbUrl={mediaUrl(msg?.id, { thumb: true })}
+                                onOpen={openSelf}
+                            />
+                            {/* For caption-less visual media, overlay the time. */}
+                            {isVisualMedia && !msg?.text && (
+                                <span className="absolute bottom-1.5 right-1.5 rounded-full bg-black/40 px-1.5 py-0.5 text-[10px] leading-none text-white select-none">
+                                    {formatTime(msg?.timestamp)}
+                                    {msg?.fromMe && <Ticks status={msg?.status} />}
+                                </span>
+                            )}
+                        </div>
+                    )}
+                    {msg?.text && (
+                        <span
+                            className={`whitespace-pre-wrap ${
+                                isVisualMedia ? "mt-1 block px-2 pb-1" : ""
+                            }`}
+                        >
+                            <MessageText text={msg?.text} entities={msg?.entities} />
+                        </span>
+                    )}
+                    {msg?.linkPreview && (
+                        <LinkPreviewCard
+                            preview={msg.linkPreview}
+                            imageUrl={
+                                (msg.linkPreview.hasImage || !!msg.linkPreview.thumb)
+                                    ? mediaUrl(msg.id, { thumb: true })
+                                    : undefined
+                            }
+                        />
+                    )}
+                    {(!isVisualMedia || msg?.text) && (
+                        <span className={isVisualMedia ? "block px-2 pb-1 text-right" : "float-right mt-1 -mb-0.5"}>
+                            {metaRow}
+                        </span>
+                    )}
+                </div>
+
+                {/* ── Reaction pills — sit just below the bubble ── */}
+                {msg.reactions && msg.reactions.length > 0 && (
+                    <div className="mt-[3px] mb-[2px] px-1">
+                        <ReactionsBar reactions={msg.reactions} fromMe={msg.fromMe} />
+                    </div>
                 )}
             </div>
         </div>
     );
 }
+
 
 // ── Full-screen media viewer (lightbox) ────────────────────────────────────────
 function ChatMediaViewer({

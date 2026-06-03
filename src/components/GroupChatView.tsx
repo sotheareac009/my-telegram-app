@@ -7,6 +7,7 @@ import type {
   ChatMedia,
   ForwardInfo,
   LinkPreview,
+  MessageReaction,
   TextEntity,
 } from "@/app/api/telegram/conversation/route";
 
@@ -43,6 +44,7 @@ type ApiMessage = {
   forwardedFrom?: ForwardInfo;
   linkPreview?: LinkPreview;
   entities?: TextEntity[];
+  reactions?: MessageReaction[];
 };
 
 type UiMessage = {
@@ -58,6 +60,7 @@ type UiMessage = {
   forwardedFrom?: ForwardInfo;
   linkPreview?: LinkPreview;
   entities?: TextEntity[];
+  reactions?: MessageReaction[];
 };
 
 function toUi(m: ApiMessage): UiMessage {
@@ -74,6 +77,7 @@ function toUi(m: ApiMessage): UiMessage {
     forwardedFrom: m.forwardedFrom,
     linkPreview: m.linkPreview,
     entities: m.entities,
+    reactions: m.reactions,
   };
 }
 

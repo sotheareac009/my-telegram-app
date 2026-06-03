@@ -76,6 +76,16 @@ export type TextEntity =
       language?: string;
     };
 
+/** One emoji reaction aggregated across all users on a message. */
+export type MessageReaction = {
+  /** The emoji character(s), e.g. "👍". */
+  emoji: string;
+  /** Total number of users who reacted with this emoji. */
+  count: number;
+  /** True when the current account is one of the reactors. */
+  chosen: boolean;
+};
+
 export type ChatMessage = {
   id: number;
   text: string;
@@ -95,6 +105,8 @@ export type ChatMessage = {
   linkPreview?: LinkPreview;
   /** Inline code / code-block spans Telegram tagged on the message. */
   entities?: TextEntity[];
+  /** Emoji reactions accumulated on this message, when any exist. */
+  reactions?: MessageReaction[];
 };
 
 /** Decode a Telegram stripped thumbnail into an inline JPEG data URL. */
@@ -332,6 +344,31 @@ function extractCodeEntities(
   return out.length > 0 ? out : undefined;
 }
 
+/** Extract emoji reactions from a GramJS message, if any. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function extractReactions(msg: any): MessageReaction[] | undefined {
+  const raw = msg.reactions;
+  if (!raw) return undefined;
+  const results = raw.results;
+  if (!Array.isArray(results) || results.length === 0) return undefined;
+  const out: MessageReaction[] = [];
+  for (const r of results) {
+    // r is a ReactionCount object
+    const reaction = r.reaction;
+    if (!reaction) continue;
+    // reactionEmoji has .emoticon; reactionCustomEmoji has .documentId
+    const emoji: string | undefined =
+      typeof reaction.emoticon === "string" ? reaction.emoticon : undefined;
+    if (!emoji) continue; // skip custom-emoji reactions (no simple text)
+    const count = typeof r.count === "number" ? r.count : Number(r.count ?? 0);
+    if (count <= 0) continue;
+    // chosen_order is set (non-null) when the current user chose this reaction
+    const chosen = r.chosenOrder != null;
+    out.push({ emoji, count, chosen });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 /** Map a GramJS message to the client-facing shape. */
 function mapMessage(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -361,6 +398,7 @@ function mapMessage(
     forwardedFrom: extractForward(msg),
     linkPreview: linkPreview ?? undefined,
     entities: extractCodeEntities(msg),
+    reactions: extractReactions(msg),
   };
 }
 
